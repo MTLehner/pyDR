@@ -6,7 +6,7 @@ Created on Thu Nov 11 12:21:34 2021
 @author: albertsmith
 """
 
-import numpy as np
+import cupy as np
 from pyDR.misc.tools import NucInfo
 
 #%% Functions for calculation of relaxation

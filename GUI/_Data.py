@@ -5,7 +5,7 @@ from pyDR.GUI.other.elements import openFileNameDialog, create_Figure_canvas, ge
 from pyDR.chimeraX.CMXRemote import CMXRemote
 
 from pyDR.IO import read_file, readNMR, isbinary
-import numpy as np
+import cupy as np
 import matplotlib.pyplot as plt
 
 class Ui_Data_final(Ui_Data):

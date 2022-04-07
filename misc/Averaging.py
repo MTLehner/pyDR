@@ -7,7 +7,7 @@ Created on Fri Mar  4 14:37:35 2022
 """
 
 from pyDR import clsDict
-import numpy as np
+import cupy as np
 from copy import copy
 from difflib import SequenceMatcher
 

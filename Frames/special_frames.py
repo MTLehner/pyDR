@@ -77,7 +77,7 @@ for proteins, because it is relatively simple)
 
 
 
-import numpy as np
+import cupy as np
 from pyDR.MDtools import vft
 from pyDR.Selection import select_tools as selt
 

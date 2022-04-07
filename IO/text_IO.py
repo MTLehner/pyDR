@@ -8,7 +8,7 @@ Created on Wed Feb 23 17:48:07 2022
 
 import os
 from pyDR import clsDict,Defaults
-import numpy as np
+import cupy as np
 dtype=Defaults['dtype']
 
 def writeNMR(filename,ob,overwrite=False):

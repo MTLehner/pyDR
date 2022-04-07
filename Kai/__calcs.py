@@ -1,5 +1,5 @@
 import MDAnalysis#
-import numpy as np
+import cupy as np
 from numba import njit, prange, float32
 from numba import cuda
 from SpeedTest import *

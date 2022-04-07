@@ -6,7 +6,7 @@ Created on Sat Nov 13 15:32:58 2021
 @author: albertsmith
 """
 
-import numpy as np
+import cupy as np
 import matplotlib.pyplot as plt
 from matplotlib import ticker
 from pyDR.misc.disp_tools import set_plot_attr,NiceStr

@@ -26,8 +26,8 @@ Created on Tue Jul 13 13:42:37 2021
 
 @author: albertsmith
 """
-
-import numpy as np
+#%% Imports
+import cupy as np
 import pyDR as DR
 import matplotlib.pyplot as plt
 import matplotlib
@@ -42,8 +42,8 @@ matplotlib.rc('font', **font)
 
 "This loads the MD trajectory into pyDIFRATE"
 tf=2000
-molsys=DR.MolSys('/Users/albertsmith/Documents/GitHub/Frames_Theory_archive/HETs_ILE254.pdb',
-                 '/Users/albertsmith/Documents/GitHub/Frames_Theory_archive/HETs_ILE254.xtc',
+molsys=DR.MolSys('/home/mlehner/DynamicDetector/Frames_Theory_archive/HETs_Ile254.pdb',
+                 '/home/mlehner/DynamicDetector/Frames_Theory_archive/HETs_Ile254.xtc',
                  tf=tf)
 #molsys=DR.MolSys('/Users/albertsmith/Documents/GitHub.nosync/Frames_Theory_archive/HETs_ILE254.pdb',
 #              '/Users/albertsmith/Documents/GitHub.nosync/Frames_Theory_archive/HETs_ILE254.xtc',
@@ -156,7 +156,7 @@ data=fr_obj.frames2data(include=inc,mode='full')
 #%% Now use the project
 import pyDR
 from pyDR.Project import Project
-proj=Project('/Users/albertsmith/Documents/Dynamics/test_project.nosync',create=True)
+proj=Project('/home/mlehner/pyDR/pyDR/test_project.nosync',create=True)
 
 
 for d in data:proj.append_data(d)

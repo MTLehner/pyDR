@@ -6,7 +6,7 @@ Created on Thu Dec  2 15:41:16 2021
 @author: albertsmith
 """
 
-import numpy as np
+import cupy as np
 from pyDR import clsDict
 from pyDR.FRET import FRETdipole
 from pyDR.Ct_funs import Ct_calc

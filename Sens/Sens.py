@@ -17,7 +17,7 @@ Some notes:
     _rhoCSA which are called by the Sens when storing calculated sensitivities
 """
 
-import numpy as np
+import cupy as np
 from pyDR.Sens.Info import Info
 from pyDR.misc.disp_tools import set_plot_attr,NiceStr
 import matplotlib.pyplot as plt

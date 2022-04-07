@@ -30,7 +30,7 @@ Created on Tue Oct  6 10:46:10 2020
 """
 
 
-import numpy as np
+import cupy as np
 from copy import deepcopy
 from pyDR.MDtools import vft
 from pyDR.MDtools.Ctcalc import sparse_index,get_count,Ctcalc

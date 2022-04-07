@@ -93,7 +93,7 @@ Created on Thu Feb  3 11:24:10 2022
 """
 
 #%% Imports
-import numpy as np
+import cupy as np
 import multiprocessing as mp
 import pkg_resources
 from pyDR import Defaults

@@ -6,7 +6,7 @@ Created on Wed Nov 10 10:42:34 2021
 @author: albertsmith
 """
 
-import numpy as np
+import cupy as np
 
 #%% Sets plot attributes from kwargs
 def set_plot_attr(hdl,**kwargs):

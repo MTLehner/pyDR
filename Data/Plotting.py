@@ -7,7 +7,7 @@ Created on Wed Feb  2 10:38:52 2022
 """
 
 import matplotlib.pyplot as plt
-import numpy as np
+import cupy as np
 import matplotlib.colors as colors
 import matplotlib as mpl
 from copy import copy

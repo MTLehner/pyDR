@@ -28,7 +28,7 @@ Created on Thu Feb  6 10:43:33 2020
 @author: albertsmith
 """
 
-import numpy as np
+import cupy as np
 from pyDR.MDtools import vft
 from pyDR.Selection import select_tools as selt
 

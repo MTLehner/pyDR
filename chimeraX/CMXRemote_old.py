@@ -10,7 +10,7 @@ Created on Tue Aug 10 17:11:14 2021
 Reference:
 https://www.cgl.ucsf.edu/chimerax/docs/user/commands/remotecontrol.html
 """
-import numpy as np
+import cupy as np
 import os
 import sys
 sys.path.append('/Users/albertsmith/Documents/GitHub')

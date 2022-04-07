@@ -8,7 +8,7 @@ Created on Thu Feb 17 11:22:53 2022
 
 import os
 from pyDR.IO import read_file
-import numpy as np
+import cupy as np
 from copy import copy
 
 class Source():

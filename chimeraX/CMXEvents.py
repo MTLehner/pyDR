@@ -8,7 +8,7 @@ Created on Wed Nov 24 11:49:56 2021
 from PyQt5.QtWidgets import QMouseEventTransition, QApplication
 from PyQt5.QtCore import Qt
 from PyQt5 import QtGui
-import numpy as np
+import cupy as np
 from matplotlib.pyplot import get_cmap
 
 class Hover():
@@ -132,7 +132,7 @@ class Detectors(Hover):
             for j, a in enumerate(residue.atoms):
                 if a.name == atom:
                     return j
-        import numpy as np
+        import cupy as np
         from matplotlib.pyplot import get_cmap
         cmap = lambda ind: (np.array(get_cmap("tab10")(i))*255).astype(int)#get_cmap("tab10")
         res_nums = []

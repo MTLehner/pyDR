@@ -29,7 +29,7 @@ Created on Mon Sep 20 13:56:00 2021
 """
 
 from pyDR.MDtools import vft
-import numpy as np
+import cupy as np
 
 
 def moving_avg(t,v,sigma):

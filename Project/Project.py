@@ -7,7 +7,7 @@ Created on Wed Feb 16 14:50:19 2022
 """
 
 import os
-import numpy as np
+import cupy as np
 from pyDR.IO import read_file, readNMR, isbinary
 from pyDR import Defaults
 from pyDR import clsDict

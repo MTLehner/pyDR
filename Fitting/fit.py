@@ -8,7 +8,7 @@ Created on Mon Jan 31 14:56:22 2022
 
 
 from pyDR import Defaults,clsDict
-import numpy as np
+import cupy as np
 import multiprocessing as mp
 from ._fitfun import fit0,dist_opt
 from copy import copy

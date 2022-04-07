@@ -6,7 +6,7 @@ Created on Thu Apr 15 15:12:40 2021
 @author: albertsmith
 """
 
-import numpy as np
+import cupy as np
 from scipy.linalg import eig
 
 def Kex(n_beta=25,n_gamma=50,beta_max=np.pi,beta_min=0):

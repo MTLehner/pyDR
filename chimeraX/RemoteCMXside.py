@@ -15,7 +15,7 @@ import CMXEvents
 import importlib
 import RemoteCMXside
 import os
-import numpy as np
+import cupy as np
 
 class ListenExec(Thread):
     """

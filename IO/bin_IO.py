@@ -9,7 +9,7 @@ Created on Tue Feb 22 11:09:41 2022
 import os
 import typing
 
-import numpy as np
+import cupy as np
 import pyDR.Sens
 
 from ..Defaults import Defaults

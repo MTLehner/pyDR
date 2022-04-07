@@ -43,7 +43,7 @@ Rotations are
 """
 
 
-import numpy as np
+import cupy as np
 from scipy.linalg import svd
 
 #%% Periodic boundary condition check

@@ -7,7 +7,7 @@ Created on Mon Nov 22 11:02:59 2021
 """
 
 
-import numpy as np
+import cupy as np
 import os
 from multiprocessing.connection import Listener,Client
 from pyDR.chimeraX.chimeraX_funs import get_path,py_line,WrCC,chimera_path,run_command

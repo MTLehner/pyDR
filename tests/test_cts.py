@@ -6,7 +6,7 @@ Created on Tue Dec  7 14:23:50 2021
 @author: albertsmith
 """
 
-import numpy as np
+import cupy as np
 import pyDR
 from pyDR.MDtools.Ctcalc import sparse_index
 import matplotlib.pyplot as plt

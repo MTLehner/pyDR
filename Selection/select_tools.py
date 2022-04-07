@@ -11,7 +11,7 @@ Library of selection tools, to help define the selections for correlation
 function calculation, frame definition, etc.
 """
 import MDAnalysis as mda
-import numpy as np
+import cupy as np
 import numbers
 
   
@@ -206,6 +206,9 @@ def protein_defaults(Nuc,mol,resids=None,segids=None,filter_str=None):
         if Nuc[:4].lower()=='ivla':
             fs0='resname ILE Ile ile VAL val Val LEU Leu leu ALA Ala ala'
             Nuc0=Nuc[4:]
+        elif Nuc[:4].lower()=='ch3a':
+            fs0='resname ILE Ile ile'
+            Nuc0="ivl"
         elif Nuc[:3].lower()=='ivl':
             fs0='resname ILE Ile ile VAL val Val LEU Leu leu'
             Nuc0=Nuc[3:]

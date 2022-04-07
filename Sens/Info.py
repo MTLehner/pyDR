@@ -6,7 +6,8 @@ Created on Tue Nov  9 14:29:46 2021
 @author: albertsmith
 """
 
-import numpy as np
+import cupy as np
+import numpy
 import copy
 
 
@@ -121,13 +122,13 @@ class Info():
             if key not in self.keys:
                 self.new_parameter(key)
                 
-        new=np.array([None for _ in range(len(self.keys))])
+        new=numpy.array([None for _ in range(len(self.keys))])
         for key,value in kwargs.items():
             new[self.keys.index(key)]=value
         if self.__values.size==0:
-            self.__values=np.array([new]).T
+            self.__values=numpy.array([new]).T
         else:
-            self.__values=np.concatenate((self.__values,np.array([new]).T),axis=1)
+            self.__values=numpy.concatenate((self.__values,numpy.array([new]).T),axis=1)
         self.__edited=True
         self.N+=1
     

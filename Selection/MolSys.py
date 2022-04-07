@@ -5,7 +5,7 @@ Created on Mon Dec  6 13:34:36 2021
 
 @author: albertsmith
 """
-import numpy as np
+import cupy as np
 from MDAnalysis import Universe,AtomGroup
 from pyDR.misc.ProgressBar import ProgressBar
 from pyDR.Selection import select_tools as selt

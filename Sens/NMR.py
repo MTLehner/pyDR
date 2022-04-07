@@ -6,7 +6,7 @@ Created on Thu Nov 11 10:28:55 2021
 @author: albertsmith
 """
 
-import numpy as np
+import cupy as np
 import os
 from pyDR.Sens import Sens
 from pyDR.Sens import NMRexper

@@ -1,7 +1,7 @@
 #!/usr/bin/chimerax
 from chimerax.core.commands import run as rc
 import os
-import numpy as np
+import cupy as np
 from chimerax.geometry import Place
 from threading import Thread
 from time import sleep

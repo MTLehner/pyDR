@@ -41,7 +41,7 @@ number generation, followed by deconstruction of the total motion using the fram
 analysis.
 
 """
-import numpy as np
+import cupy as np
 import matplotlib.pyplot as plt
 from pyDR.Frames import eval_fr as ef
 from pyDR.MDtools import vft

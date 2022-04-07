@@ -5,7 +5,7 @@ Created on Sun Jan 30 15:58:40 2022
 
 @author: albertsmith
 """
-import numpy as np
+import cupy as np
 from .. import Defaults,clsDict
 from ..IO import write_file
 from .Plotting import plot_fit,DataPlots

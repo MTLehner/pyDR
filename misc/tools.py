@@ -9,7 +9,7 @@ Created on Wed Nov 10 11:11:31 2021
 from pyDR.Sens import Info
 import os
 import re
-import numpy as np
+import cupy as np
 
 
 

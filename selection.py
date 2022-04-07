@@ -11,7 +11,7 @@ Library of selection tools, to help define the selections for correlation
 function calculation, frame definition, etc.
 """
 import MDAnalysis as mda
-import numpy as np
+import cupy as np
 import numbers
 
   

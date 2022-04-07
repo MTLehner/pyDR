@@ -27,7 +27,7 @@ Created on Tue Jul 13 13:42:37 2021
 @author: albertsmith
 """
 
-import numpy as np
+import cupy as np
 import pyDR as DR
 import matplotlib.pyplot as plt
 import matplotlib

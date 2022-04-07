@@ -7,7 +7,7 @@ Created on Wed Feb  2 16:18:36 2022
 """
 
 import pyDR
-import numpy as np
+import cupy as np
 from pyDR.MolSys import MolSelector
 from pyDR.Ct_fast import Ct00,Ct00slow,Ct00jit
 from time import time
