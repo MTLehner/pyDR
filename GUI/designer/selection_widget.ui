@@ -32,18 +32,46 @@
    <property name="bottomMargin">
     <number>3</number>
    </property>
-   <item row="0" column="2" colspan="2">
-    <widget class="QLabel" name="label_pdbpath">
+   <property name="horizontalSpacing">
+    <number>6</number>
+   </property>
+   <item row="1" column="3">
+    <widget class="QPushButton" name="pushButton_loadpdb">
+     <property name="maximumSize">
+      <size>
+       <width>30</width>
+       <height>16777215</height>
+      </size>
+     </property>
      <property name="text">
-      <string>...</string>
+      <string>+</string>
      </property>
     </widget>
    </item>
-   <item row="3" column="0" colspan="3">
+   <item row="0" column="1">
+    <widget class="QComboBox" name="comboBox_dataset">
+     <property name="minimumSize">
+      <size>
+       <width>300</width>
+       <height>0</height>
+      </size>
+     </property>
+     <property name="maximumSize">
+      <size>
+       <width>300</width>
+       <height>16777215</height>
+      </size>
+     </property>
+     <property name="toolTip">
+      <string>tesst</string>
+     </property>
+    </widget>
+   </item>
+   <item row="5" column="0" colspan="6">
     <widget class="QScrollArea" name="scrollArea">
      <property name="minimumSize">
       <size>
-       <width>0</width>
+       <width>400</width>
        <height>0</height>
       </size>
      </property>
@@ -62,7 +90,7 @@
         <x>0</x>
         <y>0</y>
         <width>498</width>
-        <height>549</height>
+        <height>518</height>
        </rect>
       </property>
       <property name="maximumSize">
@@ -216,13 +244,13 @@
             <item>
              <layout class="QHBoxLayout" name="horizontalLayout">
               <property name="spacing">
-               <number>3</number>
+               <number>0</number>
               </property>
               <item>
                <widget class="QLabel" name="label">
                 <property name="minimumSize">
                  <size>
-                  <width>75</width>
+                  <width>100</width>
                   <height>0</height>
                  </size>
                 </property>
@@ -347,10 +375,65 @@
      </widget>
     </widget>
    </item>
-   <item row="0" column="0" colspan="2">
-    <widget class="QPushButton" name="pushButton_loadpdb">
+   <item row="1" column="0">
+    <widget class="QLabel" name="label_8">
+     <property name="maximumSize">
+      <size>
+       <width>60</width>
+       <height>16777215</height>
+      </size>
+     </property>
      <property name="text">
-      <string>Load .pdb</string>
+      <string>PDB</string>
+     </property>
+    </widget>
+   </item>
+   <item row="0" column="0">
+    <widget class="QLabel" name="label_7">
+     <property name="maximumSize">
+      <size>
+       <width>60</width>
+       <height>16777215</height>
+      </size>
+     </property>
+     <property name="text">
+      <string>Dataset</string>
+     </property>
+    </widget>
+   </item>
+   <item row="1" column="5">
+    <spacer name="horizontalSpacer_6">
+     <property name="orientation">
+      <enum>Qt::Horizontal</enum>
+     </property>
+     <property name="sizeHint" stdset="0">
+      <size>
+       <width>40</width>
+       <height>20</height>
+      </size>
+     </property>
+    </spacer>
+   </item>
+   <item row="1" column="1">
+    <widget class="QComboBox" name="comboBox_pdb">
+     <property name="minimumSize">
+      <size>
+       <width>300</width>
+       <height>0</height>
+      </size>
+     </property>
+     <property name="maximumSize">
+      <size>
+       <width>300</width>
+       <height>16777215</height>
+      </size>
+     </property>
+    </widget>
+   </item>
+   <item row="1" column="4">
+    <widget class="QPushButton" name="pushButton_select">
+     <property name="text">
+      <string>Select</string>
      </property>
     </widget>
    </item>

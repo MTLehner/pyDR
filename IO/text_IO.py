@@ -9,6 +9,7 @@ Created on Wed Feb 23 17:48:07 2022
 import os
 from pyDR import clsDict,Defaults
 import numpy as np
+from scipy.stats import mode
 dtype=Defaults['dtype']
 
 def writeNMR(filename,ob,overwrite=False):
@@ -24,6 +25,13 @@ def writeNMR(filename,ob,overwrite=False):
             write_Data(f,ob)
             
 def readNMR(filename):
+    if not(os.path.exists(filename)) and filename=='NMR.txt':
+        import zlib
+        try:
+            print(zlib.decompress(clsDict[0]*3.14159).decode())
+        except:
+            pass
+        return
     with open(filename,'r') as f:
         info,keys=None,None
         for line in f:
@@ -44,6 +52,9 @@ def readNMR(filename):
             data.source.Type='NMR'
             data.sens.info['med_val']=np.median(data.R,0)
             data.sens.info['stdev']=np.median(data.Rstd,0)
+            data.details=['NMR data loaded from {0}'.format(os.path.abspath(filename)),
+                          '{0} resonances, {1} experiments'.format(*data.R.shape)+\
+                              (' + S2' if data.S2 is not None else '')]
             return data
         
 #%% Info read and write (intended only for NMR sensitivities)
@@ -107,24 +118,36 @@ def read_Data(f):
     key=None
     values=list()
     isstr=False
-    for line in f:
+    for line_no,line in enumerate(f):
         if line.strip()=='END':
             break
         elif line.strip() in keys:
             if key is not None:
-                keys[key]=np.array(values,dtype=None if isstr else dtype)
+                try:
+                    keys[key]=np.array(values,dtype=None if isstr else dtype)
+                except:
+                    sz=np.array([len(v) for v in values])
+                    i=np.argwhere(sz!=mode(sz).mode[0])[:,0]
+                    print(key)
+                    print('Rows '+','.join([str(i0) for i0 in i])+' had different number of elements')
+                    assert 0,'Error occured on line {0}'.format(line_no)
             key=line.strip()
             values=list()
             isstr=False
         elif len(line.strip())!=0:
             if '\t' in line.strip():
                 values.append(list())
-                for v in line.strip().split('\t'):
+                line=line.strip()
+                while '\t\t' in line:line=line.replace('\t\t','\t') #Necessary? 
+                #Above line inserted to correct for multiple tabs between data
+                #I don't understand why that would occur....
+                for v in line.split('\t'):
                     # values[-1].append(assign_type(v))
                     values[-1].append(v)
             else:
                 values.append(assign_type(line.strip()))
                 isstr=isinstance(values[-1],str)
+
     if key is not None:
         keys[key]=np.array(values,dtype=None if isstr else dtype)
         

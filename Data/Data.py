@@ -5,13 +5,16 @@ Created on Sun Jan 30 15:58:40 2022
 
 @author: albertsmith
 """
+import warnings
+
 import numpy as np
-from .. import Defaults,clsDict
+from pyDR import Defaults,clsDict
 from ..IO import write_file
 from .Plotting import plot_fit,DataPlots
 from ..Fitting import fit,opt2dist
 from matplotlib.figure import Figure
 from copy import copy
+# from pyDR.chimeraX.Movies import Movies
 
 dtype=Defaults['dtype']
 
@@ -54,6 +57,8 @@ class Data():
         self.source=clsDict['Source'](src_data=src_data,select=select,Type=Type)
 #        self.select=select #Stores the molecule selection for this data object
         self.vars=dict() #Storage for miscellaneous variable
+        self._movies=None
+        
         
     @property
     def Rc(self):
@@ -95,15 +100,21 @@ class Data():
         elif name == 'src_data':
             self.source._src_data = value
             return
-        elif name in ['select', 'project']:
+        # elif name=='select' and isinstance(value,str):
+        #     setattr(self.source,'select',clsDict['MolSelect'](value))
+        #     return
+        elif name in ['select', 'project','title','details']:
             setattr(self.source, name, value)
             return
         elif name in ['Rc','S2c']:
             setattr(self,'_'+name,value)
             return
+        # elif name == 'details':
+        #     self.source.details=value
+        #     return
         super().__setattr__(name, value)
         
-
+#%% Descriptive data
     @property
     def title(self):
         return self.source.title
@@ -117,6 +128,10 @@ class Data():
         return self.source.src_data
     
     @property
+    def details(self):
+        return self.source.details
+    
+    @property
     def n_data_pts(self):
         return self.R.shape[0]
     
@@ -128,14 +143,48 @@ class Data():
     def info(self):
         return self.sens.info if self.sens is not None else None
     
+#%% Some statistics
+    @property
+    def chi2(self):
+        if self.Rc is None or self.src_data is None:return None
+        return ((self.Rc-self.src_data.R)**2/self.src_data.Rstd**2).sum(1)
+    
+    @property
+    def chi2red(self):
+        chi2=self.chi2
+        if chi2 is None:return
+        return chi2/(self.Rc.shape[1]+(self.S2c is not None)-self.R.shape[1])
+    
+    @property
+    def AIC(self):
+        chi2=self.chi2
+        if chi2 is None:return
+        N,K=self.Rc.shape[1]+(self.S2c is not None),self.R.shape[1]
+        return N*np.log(chi2/N)+2*K
+    
+    @property
+    def AICc(self):
+        AIC=self.AIC
+        if AIC is None:return
+        N,K=self.Rc.shape[1]+(self.S2c is not None),self.R.shape[1]
+        return AIC+2*K*(K+1)/(N-K-1)
+    
     @property
     def _hash(self) -> int:
-        flds = ['R', 'Rstd', 'S2', 'S2std', 'sens']
+        "We'll gradually phase these out. I didn't know __hash__ was standard..."
+        return self.__hash__()
+    
+
+    def __hash__(self):
+        flds = ['R', 'Rstd', 'S2', 'S2std', 'sens', "select"]
         out = 0
         for f in flds:
             if hasattr(self, f) and getattr(self, f) is not None:
                 x = getattr(self, f)
-                out += x._hash if hasattr(x, '_hash') else hash(x.data.tobytes())
+                if hasattr(x,"tobytes"):
+                    out += hash(x.tobytes())
+                else:
+                    out += hash(x)
         return out
     
     def __len__(self):
@@ -150,7 +199,31 @@ class Data():
         # todo I was a little confused by that, might be useful to rename the return function? -K
         return fit(self, bounds=bounds, parallel=parallel)
     
-    def opt2dist(self,rhoz_cleanup=False,parallel=False):
+    def opt2dist(self,rhoz_cleanup:bool = False,parallel:bool = False):
+        """
+        Forces a set of detector responses to be consistent with some given distribution
+        of motion. Achieved by performing a linear-least squares fit of the set
+        of detector responses to a distribution of motion, and then back-calculating
+        the detectors from that fit. Set rhoz_cleanup to True to obtain monotonic
+        detector sensitivities: this option eliminates unusual detector due to 
+        oscilation and negative values in the detector sensitivities. However, the
+        detectors are no longer considered "DIstortion Free".
+                                
+    
+        Parameters
+        ----------
+        data : TYPE
+            DESCRIPTION.
+        rhoz_cleanup : TYPE, optional
+            DESCRIPTION. The default is False. If true, we use a threshold for cleanup
+            of 0.1, although rhoz_cleanup can be set to a value between 0 and 1 to
+            assign the threshold manually
+    
+        Returns
+        -------
+        data object
+    
+        """
         return opt2dist(self,rhoz_cleanup=rhoz_cleanup,parallel=parallel)
     
     def save(self, filename, overwrite: bool = False, save_src: bool = True, src_fname=None):
@@ -175,6 +248,34 @@ class Data():
                     setattr(self,f,np.delete(getattr(self,f),index,axis=0))
             if self.select is not None:
                 self.select.del_sel(index)
+                
+    def del_exp(self,index:int) -> None:
+        """
+        Deletes an experiment or experiments (provide a list of indices). Note
+        that if this is the result of a fit, deleting an experiment will prevent
+        us from back-calculating the original data
+
+        Parameters
+        ----------
+        index : int
+            Index or list of indices of experiments to delete.
+
+        Returns
+        -------
+        None
+
+        """
+        
+        if hasattr(self.sens,'opt_pars'):
+            print('Warning: Back calculating fitted parameters will no longer be possible')
+        i=np.ones(self.R.shape[1],dtype=bool)
+        i[index]=False
+        self.R=self.R[:,i]
+        self.Rstd=self.Rstd[:,i]
+        sens=copy(self.sens) #These can be shared, so we need to make a copy now
+        sens.del_exp(index)
+        self.sens=sens
+        
     
     def __copy__(self):
         cls = self.__class__
@@ -182,7 +283,39 @@ class Data():
         out.__dict__.update(self.__dict__)  
         for f in ['R','Rstd','_Rc','S2','_S2c','label','source']:
             setattr(out,f,copy(getattr(self,f)))
+        #Append copy to project (let's assume the user intends to edit the copy)
+        # if self.source.project is not None:
+        #     out.R[0,0]=1e10  #Usually, project rejects data copies. This bypasses that
+        #     self.source.project.append_data(out)
+        #     out.R[0,0]=self.R[0,0] #Put value back
+            
         return out
+    
+    def __add__(self,obj):
+        """
+        Add a data object to another data object or subproject to generate a 
+        subproject. 
+
+        Parameters
+        ----------
+        obj : Data or Project
+            Data object or Project object to add to this data object.
+
+        Returns
+        -------
+        Project
+            Subproject containing this data object plus the added data or project.
+
+        """
+        assert self.source.project is not None,"Addition (+) only defined for data in a project"
+        if str(obj.__class__)==str(clsDict['Project']):
+            return obj+self
+        proj=copy(self.source.project)
+        proj._subproject=True
+        proj._index=np.array([],dtype=int)  #Make an empty subproject
+        proj=proj+obj           #
+        return proj+self
+        
             
     
     def plot(self, errorbars=False, style='canvas', fig=None, index=None, rho_index=None, plot_sens=True, split=True,**kwargs):
@@ -232,7 +365,7 @@ class Data():
         return plot_fit(lbl=lbl,Rin=Rin,Rc=Rc,Rin_std=Rin_std,\
                     info=info,index=index,exp_index=exp_index,fig=fig)
             
-    def chimera(self,index=None,rho_index:int=None,scaling=None):
+    def chimera(self,index=None,rho_index:int=None,scaling=None) -> None:
         """
         Plots a set of detectors in chimera.
 
@@ -241,8 +374,7 @@ class Data():
         index : list-like, optional
             Select which residues to plot. The default is None.
         rho_index : int, optional
-            Select which detector to initiall show. The default is None.
-            NOT IMPLEMENTED
+            Select which detector to initially show. The default is None.
         scaling : float, optional
             Scale the display size of the detectors. If not provided, a scaling
             will be automatically selected based on the size of the detectors.
@@ -253,38 +385,62 @@ class Data():
         None.
 
         """
-        
         CMXRemote=clsDict['CMXRemote']
+
         index=np.arange(self.R.shape[0]) if index is None else np.array(index)
+
         if rho_index is None:rho_index=np.arange(self.R.shape[1])
-        R=self.R[index]
-        R*=1/R.T[rho_index].max() if scaling is None else scaling
+        if not(hasattr(rho_index, '__len__')):
+            rho_index = np.array([rho_index], dtype=int)
+        R = self.R[index]
+        R *= 1/R.T[rho_index].max() if scaling is None else scaling
         
-        R*=5
-        R[R<0.9]=0.9
-        
-        
+        R[R < 0] = 0
+
         if self.source.project is not None:
-            ID=self.source.project.chimera.id
+            ID=self.source.project.chimera.CMXid
             if ID is None:
                 self.source.project.chimera.current=0
-                ID=self.source.project.chimera.id
-                print(ID)
+                ID=self.source.project.chimera.CMXid
+            saved_commands=self.source.project.chimera.saved_commands
         else: #Hmm....how should this work?
             ID=CMXRemote.launch()
-        
-        ids=np.array([s.indices for s in self.select.repr_sel])
-        
+            saved_commands=[]
+
+        ids=np.array([s.indices for s in self.select.repr_sel[index]],dtype=object)
+
+
         # CMXRemote.send_command(ID,'close')
-        CMXRemote.send_command(ID,'open {0}'.format(self.select.molsys.topo))
-        CMXRemote.send_command(ID,'style ball')
+        CMXRemote.send_command(ID,'open "{0}" maxModels 1'.format(self.select.molsys.topo))
+        mn=CMXRemote.valid_models(ID)[-1]
+        CMXRemote.command_line(ID,'sel #{0}'.format(mn))
+
+        CMXRemote.send_command(ID,'style sel ball')
+        CMXRemote.send_command(ID,'size sel stickRadius 0.2')
+        CMXRemote.send_command(ID,'size sel atomRadius 0.8')
         CMXRemote.send_command(ID,'~ribbon')
-        CMXRemote.send_command(ID,'show')
-        CMXRemote.send_command(ID,'color all tan')
-        
+        CMXRemote.send_command(ID,'show sel')
+        CMXRemote.send_command(ID,'color sel tan')
+        CMXRemote.send_command(ID,'~sel')
+
+        for cmd in saved_commands:
+            CMXRemote.send_command(ID,cmd)
+
         out=dict(R=R,rho_index=rho_index,ids=ids)
         # CMXRemote.remove_event(ID,'Detectors')
         CMXRemote.add_event(ID,'Detectors',out)
+                
+    @property
+    def movies(self):
+        Movies=clsDict['Movies']
+        if self.source.project is None:
+            print('movies only available within projects')
+            return
+
+        if self._movies is None:
+            self._movies=Movies(self)
+        return self._movies
+            
         
         
         

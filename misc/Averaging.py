@@ -49,6 +49,9 @@ def avg2sel(data:Data,sel:MolSelect) -> Data:
         for d in data:avg2sel(d,sel)
         return
     
+    _mdmode=data.select._mdmode
+    data.select._mdmode=True
+    
     out=clsDict['Data'](sens=data.sens) #Create output data with sensitivity as input detectors
     out.source=copy(data.source)
     out.src_data=None   #We get some values from data for source, but it is not "fit"  data in the usual sense
@@ -115,7 +118,14 @@ def avg2sel(data:Data,sel:MolSelect) -> Data:
     out.select.sel1=sel10
     out.select.sel2=sel20
     
+    
+    out.details=data.details.copy()
+    out.details.append('Data was averaged to match a new selection')
+    out.details.append('Original data had length {0} and new data has length {1}'.format(len(data),len(out)))
+    
     if data.source.project is not None:data.source.project.append_data(out)
+    
+    data.select._mdmode=_mdmode
     
     return out
         
@@ -223,7 +233,13 @@ def avgData(data:Data,index:list,wt:list=None)->Data:
         out.select.sel1=sel1
         out.select.sel2=sel2
     
+    
+    out.details=data.details.copy()
+    out.details.append('Data was averaged using an index')
+    out.details.append('index=('+', '.join(str(i) for i in index)+')')
+    
     if data.source.project is not None:data.source.project.append_data(out)
+    
     return out
     
         
@@ -252,7 +268,10 @@ def avgMethyl(data:Data) -> None:
         return
     
     index=np.repeat(np.arange(data.R.shape[0]//3),3)
-    return avgData(data,index)        
+    out=avgData(data,index)
+    out.details.pop(-1)
+    out.details[-1]='Data averaging was applied over every 3 data points (methyl averaging)'
+    return out
     
 
     

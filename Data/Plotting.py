@@ -16,7 +16,7 @@ from ..misc.disp_tools import set_plot_attr,NiceStr
 
 
 class DataPlots():
-    def __init__(self,data=None,style='plot',errorbars=True,index=None,rho_index=None,title=None,fig=None,mode='auto',split=True,plot_sens=True,**kwargs):
+    def __init__(self,data=None,style='plot',errorbars=True,index=None,rho_index=None,title=None,fig=None,mode='auto',split=True,plot_sens=True,std_filter=True,**kwargs):
         self.fig=fig if fig is not None else plt.figure(title)
         self.fig.clear()
         self.fig.canvas.mpl_connect('close_event', self.close)
@@ -32,10 +32,13 @@ class DataPlots():
         self.colors=plt.rcParams['axes.prop_cycle'].by_key()['color']
         self.threshold=0.7  #Overlap threshold
         self.tclabels=None
+        self._plot_sens=plot_sens
+        self.std_filter=std_filter
+
         assert mode in ['auto','union','b_in_a'],"mode must be 'auto','union', or 'b_in_a'"
         self._mode=mode  
         if data is not None:
-            self.append_data(data,style=style,errorbars=errorbars,index=index,rho_index=rho_index,split=split,plot_sens=plot_sens,**kwargs)
+            self.append_data(data,style=style,errorbars=errorbars,index=index,rho_index=rho_index,split=split,**kwargs)
             
     @property
     def mode(self):
@@ -66,18 +69,19 @@ class DataPlots():
         self.fig.show()
     
     def append_data(self,data,style='plot',errorbars=True,index=None,rho_index=None,split=True,plot_sens=True,**kwargs):
-        if len(self.data)==0:
-            if index is not None:
-                data=copy(data)
-                for f in ['R','Rstd','S2','S2std','label']:
-                    if getattr(data,f) is not None:setattr(data,f,getattr(data,f)[index])
-                if data.select is not None and len(data.select):
-                    data.source=copy(data.source)
-                    data.source.select=copy(data.source.select)
-                    data.select.sel1=data.select.sel1[index]
-                    if data.select.sel2 is not None:
-                        data.select.sel2=data.select.sel2[index]
-                index=None
+        self._plot_sens=self._plot_sens if len(self.data) else plot_sens
+        # if len(self.data)==0: #Why did we check for no data currently in project?
+        if index is not None:
+            data=copy(data)
+            for f in ['R','Rstd','S2','S2std','label']:
+                if getattr(data,f) is not None:setattr(data,f,getattr(data,f)[index])
+            if data.select is not None and len(data.select):
+                data.source=copy(data.source)
+                data.source.select=copy(data.source.select)
+                data.select.sel1=data.select.sel1[index]
+                if data.select.sel2 is not None:
+                    data.select.sel2=data.select.sel2[index]
+            index=None
             
         self.data.append(data)        
         self.rho_index.append(self.calc_rho_index() if rho_index is None else np.array(rho_index,dtype=int))
@@ -92,28 +96,30 @@ class DataPlots():
         self.style+=style[0].lower() if style[0].lower() in ['p','s','b'] else 'p'
         
         if len(self.data)==1:
-            self.setup_plots(plot_sens)
+            self.setup_plots()
         for h in self.hdls:h.append(None)
         self.hdls_sens.append(None)
            
-        if plot_sens:self.plot_sens()
+        if self._plot_sens:self.plot_sens()
         self.plot_data(errorbars=errorbars,split=split,**kwargs)
         
         # self.show_tc()
     
     
-    def setup_plots(self,plot_sens=True):
+    def setup_plots(self):
         """
         Set up the subplots for this figure
         """
         rho_index=self.rho_index[0]
+        plot_sens=self._plot_sens
         if plot_sens:
             self.ax_sens=self.fig.add_subplot(2*plot_sens+rho_index.size,1,1)
             bbox=self.ax_sens.get_position()
             bbox.y0-=0.5*(bbox.y1-bbox.y0)
             self.ax_sens.set_position(bbox)
         
-        self.ax=[self.fig.add_subplot(2*plot_sens+rho_index.size,1,k+3) for k in range(rho_index.size)]
+        self.ax=[self.fig.add_subplot(2*plot_sens+rho_index.size,1,k+1+2*plot_sens)\
+                 for k in range(rho_index.size)]
         self.hdls=[list() for _ in self.ax]
         for a in self.ax[1:]:a.sharex(self.ax[0])
         
@@ -143,19 +149,30 @@ class DataPlots():
         
         self.remove_tc()   
         self.tclabels=list()         
-        string=NiceStr(r'$z_{1}^0$~{0:q2}' if show_z else r'$\tau_c$~{0:q2}',unit='' if show_z else 's')
+        string=NiceStr(r'$z_{1}^0$XXX{0:q2}' if show_z else r'$\tau_c$XXX{0:q2}',unit='' if show_z else 's')
         for m,(a,k) in enumerate(zip(self.ax,self.rho_index[0])):
+            sym='~'
             xlim=a.get_xlim()
             ylim=a.get_ylim()
             
             val=self.data[0].sens.info['z0'][k]
-            if not(show_z):val=10**val
+            rhoz=self.data[0].sens.rhoz[k]
+            if rhoz[0]>rhoz.max()*0.9:  #Detector sensitive to infinitely short tc
+                b=np.argmin(np.abs(rhoz-rhoz.max()/2))
+                val=self.data[0].sens.z[b]
+                sym='<'
+            elif rhoz[-1]>rhoz.max()*0.9: #Detector sensitive to infinitely long tc
+                b=np.argmin(np.abs(rhoz-rhoz.max()/2))
+                val=self.data[0].sens.z[b]
+                sym='>'
             
+            
+            if not(show_z):val=10**val
             self.tclabels.append(\
                 a.text(xlim[0]+(xlim[1]-xlim[0])*.025,ylim[0]+(ylim[1]-ylim[0])*0.95,
                    horizontalalignment='left',verticalalignment='top',
                    color=self.colors[m%len(self.colors)],fontsize='x-small',   
-                   s=string.format(val,k)))
+                   s=string.format(val,k).replace('XXX',sym)))
             
     def remove_tc(self):
         """
@@ -200,9 +217,10 @@ class DataPlots():
         for k,(a,ri) in enumerate(zip(self.ax,self.rho_index[i])):
             if ri is not None:
                 plt_style=self.plt_style(k,i,split,**kwargs)
-                Rstd=self.data[i].Rstd[self.index[i],ri] if errorbars else None
-                self.hdls[k][i]=plot_rho(x,self.data[i].R[self.index[i],ri],
-                              Rstd,ax=a,**plt_style)[1]
+                Rstd=self.data[i].Rstd[self.index[i],ri]
+                i0=Rstd<1e3 if self.std_filter else np.ones(Rstd.shape,dtype=bool)
+                self.hdls[k][i]=plot_rho(x[i0],self.data[i].R[self.index[i],ri][i0],
+                              Rstd[i0] if errorbars else None,ax=a,**plt_style)[1]
         self.xlabel(i)        
         if self.style[i]=='b':self.adjust_bar_width()
     
@@ -211,15 +229,18 @@ class DataPlots():
         d0,di=self.data[0],self.data[i]
         
         if d0.select is not None and di.select is not None and len(d0.select) and len(di.select):
-            return d0.select.compare(di.select)
-        else:
-            in01=list()
-            for da,db in [(d0,di),(di,d0)]:
-                inab=list()
-                for lbl in db.label:
-                    if lbl in da.label:inab.append(np.argwhere(da.label==lbl)[0,0])
-                in01.append(np.array(inab))
-            return in01
+            out=d0.select.compare(di.select)
+            if len(out[0]):
+                return d0.select.compare(di.select)
+
+        in01=list()
+        for da,db in [(d0,di),(di,d0)]:
+            inab=list()
+            for lbl in db.label:
+                if lbl in da.label:inab.append(np.argwhere(da.label==lbl)[0,0])
+            in01.append(np.array(inab))
+        return in01
+            # return np.array(in01,dtype=int)
             
     def xindex(self,i=-1):
         """
@@ -234,7 +255,7 @@ class DataPlots():
         mode=self.mode
         
         in1=self.comparex(i=i)[1]
-            
+        
         if mode=='b_in_a':return in1
         di=self.data[i]
         index=np.ones(di.R.shape[0],dtype=bool)
@@ -281,9 +302,9 @@ class DataPlots():
         Returns the labels for the x-axis. Set update to True in order to actually
         apply those labels
         """
-        
-        if self.data[0].label.dtype.kind in ['f','i'] and self.data[i].label.dtype.kind in ['f','i']:
-            for a in self.ax[:-1]:a.set_xticklabels([])   #Only show label on last axis
+        if np.issubdtype(self.data[0].label.dtype,np.number) and np.issubdtype(self.data[0].label.dtype,np.number):
+        # if self.data[0].label.dtype.kind in ['f','i'] and self.data[i].label.dtype.kind in ['f','i']:
+            # for a in self.ax[:-1]:a.set_xticklabels([])   #Only show label on last axis
             return #Just use the automatic labels if all labels are numeric
         xpos0,xposi=self.xpos(0),self.xpos(i)
         xpos=np.union1d(xpos0,xposi)
@@ -435,11 +456,12 @@ def plot_rho(lbl,R,R_std=None,style='plot',color=None,ax=None,split=True,**kwarg
     if lbl0 is not None:
         ax.set_xticks(lbl)
         ax.set_xticklabels(lbl0,rotation=90)
+
                 
     return ax,hdls
 
 
-def plot_fit(lbl,Rin,Rc,Rin_std=None,info=None,index=None,exp_index=None,fig=None):
+def plot_fit(lbl,Rin,Rc,Rin_std=None,info=None,index=None,exp_index=None,fig=None,std_filter=True):
     """
     Plots the fit of experimental data (small data sizes- not MD correlation functions)
     Required inputs are the data label, experimental rates, fitted rates. One may
@@ -504,11 +526,12 @@ def plot_fit(lbl,Rin,Rc,Rin_std=None,info=None,index=None,exp_index=None,fig=Non
     #Sweep through each experiment
     clr=[k for k in colors.TABLEAU_COLORS.values()]     #Color table
     for k,a in enumerate(ax):
-        a.bar(lbl,Rin[:,k],color=clr[np.mod(k,len(clr))])       #Bar plot of experimental data
+        i0=Rin_std[:,k]/Rin[:,k].max()<1e3 if std_filter else np.ones(Rin_std.shape[0],dtype=bool)
+        a.bar(lbl[i0],Rin[i0,k],color=clr[np.mod(k,len(clr))])       #Bar plot of experimental data
         if Rin_std is not None:             
-            a.errorbar(lbl,Rin[:,k],Rin_std[:,k],color='black',linestyle='',\
+            a.errorbar(lbl[i0],Rin[i0,k],Rin_std[i0,k],color='black',linestyle='',\
                        capsize=3) #Errorbar
-        a.plot(lbl,Rc[:,k],linestyle='',marker='o',color='black',markersize=3)
+        a.plot(lbl[i0],Rc[i0,k],linestyle='',marker='o',color='black',markersize=3)
         if xax[k]:
             if lbl0 is not None:
                 a.set_xticks(ii)

@@ -10,10 +10,8 @@ Created on Mon Nov 22 13:25:09 2021
 from multiprocessing.connection import Client
 from chimerax.core.commands import run
 from threading import Thread
-from time import sleep,time
+from time import sleep
 import CMXEvents
-import importlib
-import RemoteCMXside
 import os
 import numpy as np
 
@@ -49,7 +47,7 @@ class EventManager(Thread):
     def run(self):
         print('Event manager started')
         while self.is_session_alive:
-            sleep(.1)
+            sleep(.03)
             if self.cmx.session.ui.main_window.isActiveWindow(): #This checks if chimera is terminated (chimera hangs on close without this)
                 for name,f in self.cmx._events.copy().items():
                     try:
@@ -76,7 +74,7 @@ class CMXReceiver():
             self.__isRunning=False
             if hasattr(self,'client'):self.client.close()
             print('fail')
-            # run(self.session,'exit')
+            run(self.session,'exit')
             return
 
         self.wait4command()
@@ -102,7 +100,7 @@ class CMXReceiver():
     def wait4command(self):
         if self.LE and self.LE.args:
             fun, *args = self.LE.args
-            if hasattr(self, fun):
+            if hasattr(self, fun): #If fun is in this class, then we run it with the provided args
                 try:
                     getattr(self, fun)(*args)
                 except:
@@ -114,7 +112,7 @@ class CMXReceiver():
             self.LE = ListenExec(self)
 #        self.LE.isDaemon=True
         self.LE.start()
-        print(self.LE_1.is_alive())
+        # print(self.LE_1.is_alive())
     
     def command_line(self, string):
         '''running this from inside an event will cause a crash of chimerax'''
@@ -162,6 +160,61 @@ class CMXReceiver():
             print('index exceeds number of atom groups')
             return
         self.get_atoms()[index].coords+=np.array(shift)
+    
+    def show_sel(self,ids:np.ndarray,color=(255,0,0,255)):
+        """
+        Highlight a selection of atoms by id in ChimeraX. Provide the chimeraX
+        session ID, an array of ids (numpy integer array), and optionally a
+        color tuple (3 or 4 elements, 0 to 1 or 0 to 255)
+
+        Parameters
+        ----------
+        ID : int
+            ChimeraX session ID.
+        ids : np.ndarray
+            Selection ids.
+        color : tuple, optional
+            Color to use. The default is (255,0,0,255).
+
+        Returns
+        -------
+        None.
+
+        """
+        print('checkpoint')
+        for k in range(len(self.session.models),0,-1):
+            if hasattr(self.session.models[k-1],'atoms'):
+                model=self.session.models[k-1]
+                print(k)
+                break
+        print(ids)
+        print(color)
+        model.atoms[ids].colors=color
+    
+    def play_traj(self,topo:str,traj:str):
+        """
+        Opens a trajecory in chimeraX and sets up the play settings
+
+        Parameters
+        ----------
+        topo : str
+            Topology file.
+        traj : str
+            Trajectory file.
+
+        Returns
+        -------
+        None.
+
+        """
+        print("open '{0}' coordset true".format(topo))
+        
+        run(self.session,"open 2kj3")
+        # run(self.session,"open '{0}' coordset true".format(topo))
+        n=len(self.get_atoms())
+        print("open '{0}' structureModel #{1}".format(traj,n))
+        # run(self.session,"open '{0}' structureModel #{1}".format(traj,n))
+        # run(self.session,"coordset slider #{0}".format(n))
         
     def Exit(self):
         try:
@@ -180,7 +233,42 @@ class CMXReceiver():
                 sel[-1]['b1'] = b1.coord_indices
                 sel[-1]['a'] = mdl.atoms[mdl.atoms.selected].coord_indices
         self.client.send(sel)
+        
+    def how_many_models(self):
+        """
+        Tells pyDR how many atom-containing models are open in ChimeraX
 
+        Returns
+        -------
+        None.
+
+        """
+        count=0
+        for k in range(len(self.session.models),0,-1):
+            if hasattr(self.session.models[k-1],'atoms'):count+=1
+        
+        self.client.send(count)
+        
+    def valid_models(self):
+        """
+        Tells pyDR the indices of valid models (#1,#2, etc.)
+                                                
+        Returns
+        -------
+        None.
+
+        """
+        counter=0
+        mdls=list()
+        for m in self.session.models:
+            if hasattr(m,'atoms'):
+                if m.parent is None or not(hasattr(m.parent,'atoms')):
+                    counter+=1
+                    mdls.append(counter)
+            else:
+                if m.parent is None:
+                    counter+=1
+        self.client.send(mdls)
 
     def send_command(self,string):
         """todo I found out, that creating any Model with the command line interface inside the thread will cause a program

@@ -14,25 +14,29 @@ from pyDR import clsDict
 import re
 from copy import copy
 from matplotlib.figure import Figure
-ME=Defaults['max_elements']
+import matplotlib.pyplot as plt
 decode=bytes.decode
 
 
 class DataMngr():
     def __init__(self, project):
         self.project = project
-        if not(os.path.exists(self.directory)):
-            os.mkdir(self.directory)
+
         self._saved_files = list()
-        for fname in os.listdir(self.directory):
-            if '.data' in fname:
-                self._saved_files.append(fname)
-        self._saved_files.sort()
+        
+        if self.directory:
+            if not(os.path.exists(self.directory)):
+                os.mkdir(self.directory)
+            for fname in os.listdir(self.directory):
+                if '.data' in fname:
+                    self._saved_files.append(fname)
+            self._saved_files.sort()
         self.data_objs = [None for _ in self.saved_files]
         self._hashes = [None for _ in self.saved_files]
 
     @property
     def directory(self):
+        if self.project.directory is None:return
         return os.path.join(self.project.directory, 'data')
         
     @property
@@ -40,6 +44,7 @@ class DataMngr():
         return self._saved_files
                 
     def load_data(self,filename=None,index=None):
+        if self.directory is None:return
         "Loads a saved file from the project directory"
         if filename is not None:
             assert filename in self.saved_files,"{} not found in project. Use 'append_data' for new data".format(filename)
@@ -48,6 +53,9 @@ class DataMngr():
         self.data_objs[index]=read_file(fullpath,directory=self.project.directory)
         self._hashes[index]=self.data_objs[index]._hash
         self.data_objs[index].source.project=self.project
+        if self.data_objs[index].source.select is not None:
+            self.data_objs[index].source.select.molsys.project=self.project
+            self.data_objs[index].source.select.project=self.project
         
         
     def append_data(self,data):
@@ -69,18 +77,23 @@ class DataMngr():
             print("Data already in project (index={})".format(self.data_objs.index(data)))
             return
             
+
         self.data_objs.append(data)
         self._hashes.append(None)   #We only add the hash value if data is saved
         self._saved_files.append(None)
         self.data_objs[-1].source.project=self.project
         
+        if self.data_objs[-1].source.select is not None:
+            self.data_objs[-1].source.select.molsys.project=self.project
+            self.data_objs[-1].source.select.project=self.project
+
         if self.project is not None:
             flds=['Type','status','short_file','title','additional_info']
             dct={f:getattr(self.data_objs[-1].source,f) for f in flds}
             dct['filename']=None
             self.project.info.new_exper(**dct)
             self.project._index=np.append(self.project._index,len(self.data_objs)-1)
-        
+
         if data.src_data is not None:
             if data.src_data in self.data_objs:
                 data.src_data=self[self.data_objs.index(data.src_data)]
@@ -177,19 +190,25 @@ class DataMngr():
         "Logical index "
         return [True if d is None else h==d._hash for h,d in zip(self._hashes,self.data_objs)]
     
-    def save(self,i='all'):
+    def save(self,i='all',include_rawMD=False):
         """
         Save data object stored in the project by index, or set i to 'all' to
         save all data objects. Default is to derive the filename from the title.
         To save to a specific file, use data.save(filename='desired_name') instead
         of saving from the project.
         """
+        ME=Defaults['max_elements']
         if i=='all':
             for i in range(len(self)):
                 if not(self.saved[i]):
-                    if self[i].R.size>ME:
-                        print('Skipping data object {0}. Size of data.R ({1}) exceeds default max elements ({2})'.format(i,self[i].R.size,ME))
+                    # if self[i].R.size>ME:
+                    #     print('Skipping data object {0}. Size of data.R ({1}) exceeds default max elements ({2})'.format(i,self[i].R.size,ME))
+                    #     continue
+                    if self[i].source.status=='raw' and str(self[i].sens.__class__).split('.')[-1][:-2]=='MD'\
+                        and not(include_rawMD):
+                        print('Skipping data object "{0}".\n Set include_rawMD to True to include raw MD data'.format(self[i].title))
                         continue
+                            
                     self.save(i)
         else:
             assert i<len(self),"Index {0} to large for project with {1} data objects".format(i,len(self))
@@ -198,10 +217,14 @@ class DataMngr():
                 if self[i].src_data is not None and not(isinstance(self[i].src_data,str)):
                     k=np.argwhere([self[i].src_data==d for d in self.data_objs])[0,0]
                     
-                    if self[k].R.size<=ME:
+                    # if self[k].R.size<=ME:
+                    #     self.save(k)
+                    if not(self[k].source.status=='raw' and str(self[k].sens.__class__).split('.')[-1][:-2]=='MD')\
+                        or include_rawMD:
                         self.save(k)
                     else:
-                        print('Skipping source data of object {0} (project index {1}). Size of source data exceeds default max elements ({2})'.format(i,k,ME))
+                        # print('Skipping source data of object {0} (project index {1}). Size of source data exceeds default max elements ({2})'.format(i,k,ME))
+                        print('Skipping source data of object "{0}".\n Set include_rawMD to True to include raw MD data'.format(self[i].title))
                     src_fname=self.save_name[k]
                 self[i].save(self.save_name[i],overwrite=True,save_src=False,src_fname=src_fname)
                 self[i].source.saved_filename=self.save_name[i]
@@ -424,46 +447,206 @@ class Chimera():
     def __init__(self,project):
         self.project=project
         self._current=[-1]
-        self._ids=[]
+        self._CMXids=[]
         self.CMX=clsDict['CMXRemote']
+        self.saved_commands=[] #Automatically run these commands when chimera is initialized.
     
     @property
-    def id(self):
-        if self.current is not None:return self._ids[self.current]
+    def CMXid(self):
+        if self.current is not None:return self._CMXids[self.current]
     
     @property
     def current(self):
         if self._current[0]==-1:return None
-        if not(self.CMX.isConnected(self._current[0])):return None
+        if not(len(self._CMXids)):return None
+        if not(self.CMX.isConnected(self._CMXids[self._current[0]])):
+            while len(self._CMXids):
+                if self.CMX.isConnected(self._CMXids[-1]):
+                    print('Session {0} was not connected. Reseting to session {1}'\
+                          .format(self._current[0],len(self._CMXids)-1))
+                    self._current[0]=len(self._CMXids)-1
+                    return self._current[0]
+                else:
+                    self._CMXids.pop()
+            print('No sessions were connected')
+            self._current[0]=-1
+            return None
         return self._current[0]
     
     def __setattr__(self,name,value):
         if name=='current': #Set the current chimeraX connection, and assert that there is an active connection
             assert isinstance(value,(int,np.integer)) and value>=0,"ID must be a non-negative integer"
-            while len(self._ids)<=value:
-                self._ids.append(None)
-            if self._ids[value] is None or not(self.CMX.isConnected(self._ids[value])):
-                self._ids[value]=self.CMX.launch()
-                if self.CMX.isConnected(self._ids[value]):
+            while len(self._CMXids)<=value:
+                self._CMXids.append(None)
+            if self._CMXids[value] is None or not(self.CMX.isConnected(self._CMXids[value])):
+                self._CMXids[value]=self.CMX.launch()
+                if self.CMX.isConnected(self._CMXids[value]):
                     self._current[0]=value
             return
         super().__setattr__(name,value)
     
-    def __call__(self,index:int=None,rho_index:int=None,scaling=None,offset=None):
+    def __call__(self,index=None,rho_index=None,scaling=None,offset=None):
+        if scaling is None:
+            m=0
+            for d in self.project:
+                i=np.arange(d.R.shape[0]) if index is None else index
+                r=np.arange(d.R.shape[1]) if rho_index is None else rho_index
+                m=max((d.R[i][:,r].max(),m))
+            scaling=1/m
+        if self.current is None:self.current=0
+        
+        
+        #A bunch of stuff to try to guess which atoms to align
+        res0=[np.min(d.select.uni.residues.resids) for d in self.project]
+        ress=[np.max([res0[0],r]) for r in res0]
+        i0=[np.argwhere(r==d.select.uni.residues.resids)[0,0] for d,r in zip(self.project,ress)]
+        resl=[len(d.select.uni.residues[i:]) for i,d in zip(i0,self.project)]
+        resl=[np.min([resl[0],r]) for r in resl]
+        resf=[(self.project[0].select.uni.residues.resids[i0[0]+l-1],
+               d.select.uni.residues.resids[i+l-1]) for d,i,l in zip(self.project,i0,resl)]
 
         for k,d in enumerate(self.project):
             if offset is None:
-                offset=np.std(d.select.pos,0)*3
+                offset=np.std(d.select.pos,0)*6
                 # offset[offset!=offset.min()]=0
+                ax=['x','y','z'].pop(np.argmin(offset))
+                offset=offset.min()
             d.chimera(index=index,rho_index=rho_index,scaling=scaling)
-            self.CMX.conn[self.id].send(('shift_position',-1,offset*k))
+            
+            if not(k):
+                mn=self.CMX.valid_models(self.CMXid)[-1]
+            else:
+                mdl_num=self.CMX.valid_models(self.CMXid)[-1]
+                cmds='align #{3}:{4}-{5}@CA toAtoms #{0}:{1}-{2}@CA cutoffDistance 5'.format(\
+                                    mn,ress[k],resf[k][0],mdl_num,ress[k],resf[k][1])
+                self.command_line(cmds)
+            
+                
+            # self.CMX.conn[self.CMXid].send(('shift_position',-1,offset*k))
+                self.command_line('move {0} {1} models #{2} coordinateSystem #{3}'.format(\
+                                ax,offset*k,mdl_num,mn))
+        self.command_line('view')
+    
+    
+    
+    def command_line(self,cmds:list=None,ID:int=None) -> None:
+        """
+        Send commands to chimeraX as a single string, as a list, or interactively
+        (provide cmds as a string, as a list of strings, or None, respectively)
+
+        Parameters
+        ----------
+        cmds : list, optional
+            List of commands to send to the specified chimera instance. 
+            The default is None, in which case an interactive command line will
+            be opened. May optionally be provided a single string
+        ID : int, optional
+            Specify which chimera session to interact with. The default is None,
+            which sends to the active session.
+
+        Returns
+        -------
+        None.
+
+        """
+        CMXid=self._CMXids[ID] if ID is not None else self.CMXid
+        if CMXid is None:
+            print("No active sessions, exiting command_line")
+            return
+        
+        if cmds is not None:
+            if isinstance(cmds,str):cmds=[cmds]
+            for cmd in cmds:
+                self.CMX.send_command(CMXid,cmd)
+        else:
+            print('Type "exit" to return to python')
+            cmd=''
+            while True:  
+                cmd=input('ChimeraX>')
+                if cmd.strip()=='exit':break
+                self.CMX.send_command(CMXid,cmd)
+    def close(self,ID:int=None) -> None:
+        """
+        Closes all models in the current or specified chimeraX session.
+
+        Parameters
+        ----------
+        ID : int, optional
+            Specifies which session in which to close the models.
+            The default is None, which closes in the current chimeraX session.
+
+        Returns
+        -------
+        None
+
+        """
+        self.command_line(cmds='close',ID=ID)
+                
+    def savefig(self,filename:str,options:str='',ID:int=None)-> None:
+        """
+        Saves the current chimera window to a figure. If a relative path is
+        provided, this will save within the project figure folder. One may
+        pass options to the save in chimera via a string. 
+
+        Parameters
+        ----------
+        filename : str
+            Save location. Relative locations will be stored in the project 
+            figure folder
+        options : str, optional
+            String contain options for saving in chimeraX. Multiple options can
+            be included in the string, as if they were being entered withing
+            chimera. The default is None.
+        ID : int, optional
+            Specify which chimeraX session to save. The default is None, which 
+            saves the active session.
+
+        Returns
+        -------
+        None
+            DESCRIPTION.
+
+        """
+        CMXid=self._CMXid[ID] if ID is not None else self.CMXid
+        assert CMXid is not None,"No active sessions, save not completed"
+        
+        if not(os.path.exists(os.path.join(self.project.directory,'figures'))):
+            os.mkdir(os.path.join(self.project.directory,'figures'))
+        
+        filename=os.path.join(os.path.join(self.project.directory,'figures'),filename)
+        if len(filename.split('.'))<2:filename+='.png'
+        
+        
+        self.command_line('save "{0}" {1}'.format(filename,options))
+
+#%% Numpy nice display
+
+        
+class nparray_nice(np.ndarray):
+    def __new__(cls, *args, **kwargs):
+        return super().__new__(cls, *args, **kwargs)
+
+    def _ipython_display_(self):
+        for x in self:print(x)
+        
+    def __repr__(self):
+        out=''
+        for x in self:out+=x+'\n'
+        return out 
+    
+def mk_nparray_nice(x):
+    if not(hasattr(x,'__len__')):x=[x]
+    out=nparray_nice(shape=[len(x)],dtype=object)
+    for k,x0 in enumerate(x):
+        out[k]=x0
+    return out
 
 #%% Project class
 class Project():
     """
     Project class of pyDIFRATE, used for organizing data and plots
     """
-    def __init__(self, directory:str, create:bool = False, subproject:bool = False) -> None:
+    def __init__(self, directory:str=None, create:bool = False, subproject:bool = False) -> None:
         """
         Initialize a pyDIFRATE project, for organizing data and plots
 
@@ -484,10 +667,10 @@ class Project():
 
         """
         self.name = directory   #todo maybe create the name otherwise?
-        self._directory = os.path.abspath(directory)
-        if not(os.path.exists(self.directory)) and create:
+        self._directory = os.path.abspath(directory) if directory is not None else None
+        if self.directory and not(os.path.exists(self.directory)) and create:
             os.mkdir(self.directory)
-        assert os.path.exists(self.directory),'Project directory does not exist. Select an existing directory or set create=True'
+        # assert os.path.exists(self.directory),'Project directory does not exist. Select an existing directory or set create=True'
                
         self.data=DataMngr(self)
         self._subproject = subproject  #Subprojects cannot be edited/saved
@@ -512,6 +695,27 @@ class Project():
                     self.plots[value-1].project=self
             return
         super().__setattr__(name,value)
+        
+    def __getattr__(self,name):
+        """
+        This allows us to access properties of the data in case a project selection
+        yields just a single data object.
+
+        Parameters
+        ----------
+        name : TYPE
+            DESCRIPTION.
+
+        Returns
+        -------
+        TYPE
+            DESCRIPTION.
+
+        """
+        if len(self)==1 and hasattr(self[0],name):
+            return getattr(self[0],name)
+        return super(object).__getattr__(self,name)
+        
     #%% Detector manager
     @property
     def detect(self):
@@ -523,7 +727,7 @@ class Project():
         flds=['Type','status','short_file','title','additional_info','filename']
         for f in flds:info.new_parameter(f)
         
-        if os.path.exists(os.path.join(self.directory,'project.txt')):
+        if self.directory and os.path.exists(os.path.join(self.directory,'project.txt')):
             dct={}
             with open(os.path.join(self.directory,'project.txt'),'r') as f:
                 for line in f:
@@ -540,6 +744,7 @@ class Project():
                 
         for k,file in enumerate(self.data.saved_files):
             if file not in info['filename']:   #Also include data that might be missing from the project file
+                # print(file)    
                 src=self.data[k].source
                 dct={f:getattr(src,f) for f in flds}
                 dct['filename']=file
@@ -565,13 +770,38 @@ class Project():
         self._index=np.array(self._index,dtype=int)
                 
     def write_proj(self):
+        self.update_info()
         with open(os.path.join(self.directory,'project.txt'),'w') as f:
             for i in self._index:
-                f.write('DATA\n')
-                for k,v in self.info[i].items():f.write('{0}:\t{1}\n'.format(k,v))
-                f.write('END:DATA\n')
+                if self.data.saved[i]:
+                    f.write('DATA\n')
+                    for k,v in self.info[i].items():f.write('{0}:\t{1}\n'.format(k,v))
+                    f.write('END:DATA\n')
+                
+    def update_info(self)->None:
+        """
+        Changes to identifying information in source (Type, status, short_file, 
+        etc.) will not be automatically reflected in a project's indexing. 
+        Run update_info on the project (or subproject) where changes have been
+        made to obtain the updated parameters
+
+        Returns
+        -------
+        None.
+
+        """
+        for i in self._index:
+            if self.data.data_objs[i] is not None:
+                for k in self.info.keys:
+                    if k=='filename':
+                        self.info[k,i]=os.path.split(self.data.save_name[i])[1]
+                    else:
+                        self.info[k,i]=getattr(self.data.data_objs[i].source,k)
+            
 
     #%%Indexing/subprojects
+
+            
     @property
     def subproject(self):
         return self._subproject
@@ -581,23 +811,37 @@ class Project():
         self.data.append_data(data)
         
     def remove_data(self,index,delete=False):
-        #TODO implement this the right way
-        assert not(self._subproject),"Data cannot be removed from subprojects"
-        proj=self[index]
+        #TODO Some problems may arise if data is removed but not deleted, and the project is subsquently saved
+        # assert not(self._subproject),"Data cannot be removed from subprojects"
         
-        if hasattr(proj,'R'):#Single index given, thus self[index] returns a data object
-            index=[self.data.data_objs.index(proj)]
+        if not(hasattr(index,'__len__')):index=[index]
+        
+        if self._subproject:
+            i=[self.parent_index[i] for i in index]
+            self._parent.remove_data(i,delete=delete)
+            index=np.sort([self._index[i] for i in index])[::-1] #Convert to data index
+            for i in index:
+                self._index=self._index[self._index!=i]
+                self._index[self._index>i]-=1
         else:
-            index=np.sort(proj._index)[::-1]
-        
-        # if delete and len(index)>1:
-        #     print('Delete data sets permanently by full title or index (no multi-delete of saved data allowed)')
-        #     return
-        
-        for i in index:
-            self.data.remove_data(index=i,delete=delete)
-            self._index=self._index[self._index!=i]
-            self._index[self._index>i]-=1
+            
+            index=np.sort([self._index[i] for i in index])[::-1] #Convert to data index
+            
+            # proj=self[index]
+            
+            # if hasattr(proj,'R'):#Single index given, thus self[index] returns a data object
+            #     index=[self.data.data_objs.index(proj)]
+            # else:
+            #     index=np.sort(proj._index)[::-1]
+            
+            # if delete and len(index)>1:
+            #     print('Delete data sets permanently by full title or index (no multi-delete of saved data allowed)')
+            #     return
+            
+            for i in index:
+                self.data.remove_data(index=i,delete=delete)
+                self._index=self._index[self._index!=i]
+                self._index[self._index>i]-=1
 
     def __iter__(self):
         def gen():
@@ -613,6 +857,12 @@ class Project():
     def size(self) -> int:
         return self.__len__()
     
+    def __copy__(self):
+        cls = self.__class__
+        result = cls.__new__(cls)
+        result.__dict__.update(self.__dict__)
+        return result
+    
     def __getitem__(self, index: int):
         """
         Extract a data object or objects by index or title (returns one item) or
@@ -624,6 +874,7 @@ class Project():
         
         proj=copy(self)
         proj._subproject=True
+        proj._parent=self
         proj.chimera=copy(self.chimera)
         proj.chimera.project=proj
         if isinstance(index,str):
@@ -632,6 +883,13 @@ class Project():
                 if index in getattr(self,f):
                     proj._index=self._index[getattr(self,f)==index]
                     return proj
+                if f=='short_files':
+                    "Also check for match without file ending"
+                    values=np.array([v.rsplit('.',1)[0] for v in getattr(self,f)],dtype=object)
+                    if index in values:
+                        proj._index=self._index[values==index]
+                        return proj
+                
             r = re.compile(index)
             i=list()
             for t in self.titles:
@@ -657,29 +915,120 @@ class Project():
         
     @property
     def Types(self):
-        return self.info['Type'][self._index]
+        return mk_nparray_nice(self.info['Type'][self._index])
     
     @property
     def statuses(self):
-        return self.info['status'][self._index]
+        return mk_nparray_nice(self.info['status'][self._index])
     
     @property
     def titles(self): 
-        return self.info['title'][self._index]
+        return mk_nparray_nice(self.info['title'][self._index])
     
     @property
     def short_files(self):
-        return self.info['short_file'][self._index]
+        return mk_nparray_nice(self.info['short_file'][self._index])
     
     @property
     def additional_info(self):
-        return self.info['additional_info'][self._index]
+        return mk_nparray_nice(self.info['additional_info'][self._index])
     
-    def save(self):
+    @property
+    def filenames(self):
+        return mk_nparray_nice(self.info['filename'][self._index])
+    
+    @property
+    def parent_index(self):
+        """
+        Returns the location of data objects of a subproject in the parent project
+
+        Returns
+        -------
+        np.array
+
+        """
+        if not(self._subproject):return None
+        return np.array([np.argwhere(i==self._parent._index)[0,0] for i in self._index],dtype=int)
+        
+        
+    def save(self,include_rawMD=False):
         assert not(self._subproject),"Sub-projects cannot be saved"
-        self.data.save()
+        self.data.save(include_rawMD=include_rawMD)
         self.write_proj()
+
+    #%% Project operations (|,&,-, i.e. Union, Intersection, and Difference)
+    def __add__(self,obj):
+        "Can't make up my mind about this...the | operation is sort of like adding two sets"
+        return self.__or__(obj)
     
+    def __or__(self,obj):    
+        proj=copy(self)
+        proj._subproject=True
+        proj.chimera=copy(self.chimera)
+        proj.chimera.project=proj
+        
+        if str(clsDict['Data'])==str(obj.__class__):
+            if obj in self.data.data_objs:
+                i=self.data.data_objs.index(obj)
+                if i not in proj._index:
+                    proj._index=np.concatenate((proj._index,[i]))
+                else:
+                    print('Warning: Data object {} already in subproject'.format(obj.title))
+                return proj
+            else:
+                print('Warning: Union only defined withing subprojects of the same main project')
+                return
+        assert str(self.__class__)==str(obj.__class__),"Operation not defined"
+        
+        for i in obj._index:
+            if i not in proj._index:
+                proj._index=np.concatenate((proj._index,[i]))
+        return proj
+        
+    def __sub__(self,obj):
+        proj=copy(self)
+        proj._subproject=True
+        proj.chimera=copy(self.chimera)
+        proj.chimera.project=proj
+        
+        if str(clsDict['Data'])==str(obj.__class__):
+            if obj in self.data.data_objs:
+                i=self.data.data_objs.index(obj)
+                if i in proj._index:
+                    proj._index=proj._index[proj._index!=i]
+                else:
+                    print('Warning: Data object {} not in subproject'.format(obj.title))
+                return proj
+            else:
+                print('Warning: Exclusion only defined withing subprojects of the same main project')
+                return
+        assert str(self.__class__)==str(obj.__class__),"Operation not defined"
+        
+        for i in obj._index:
+            if i in proj._index:
+                proj._index=proj._index[proj._index!=i]
+        return proj
+    
+    def __and__(self,obj):
+        proj=copy(self)
+        proj._subproject=True
+        proj.chimera=copy(self.chimera)
+        proj.chimera.project=proj
+        
+        if str(clsDict['Data'])==str(obj.__class__):
+            if obj in self.data.data_objs:
+                i=self.data.data_objs.index(obj)
+                proj._index=np.array([i] if i in self._index else [],dtype=int)
+                return proj
+            else:
+                print('Warning: Intersection only defined withing subprojects of the same main project')
+                return
+        else:
+            proj._index=np.intersect1d(self._index,obj._index)
+            return proj
+        
+        
+        
     
     #%% Plotting functions
     @property
@@ -709,7 +1058,7 @@ class Project():
         if self.current_plot:
             return self.plot_obj.fig
     
-    def savefig(self,fignum:int=None,filename:str=None,filetype:str='png',overwrite:bool=False) -> None:
+    def savefig(self,filename:str=None,fignum:int=None,filetype:str='png',overwrite:bool=False) -> None:
         """
         Saves a figure from the project into the project's figure folder.
         
@@ -736,8 +1085,10 @@ class Project():
             
         if fignum is None:fignum=self.current_plot
         assert self.plots[fignum-1] is not None,"Selected figure ({}) does not exist".format(fignum)
-        if filename is None:filename=self.plots[fignum-1].fig.canvas.get_window_title()
-        for s in [' ','.','%','&','{','}','/','<','>','*','?','/','$','!',"'",'"',':','@','+','`','|','=']:
+        if filename is None:
+            filename=self.plots[fignum-1].fig.canvas.get_window_title()
+            for s in ['/','.']:filename=filename.replace(s,'_')
+        for s in [' ','%','&','{','}','<','>','*','?','$','!',"'",'"',':','@','+','`','|','=']:
             # filename=filename.replace(s,'' if s in [',','.','"',"'"] else '_')
             filename=filename.replace(s,'_')
             while '__' in filename:filename=filename.replace('__','_')
@@ -774,7 +1125,8 @@ class Project():
         fig-=1
         if len(self.plots) > fig and self.plots[fig] is not None:
             hdl=self.plots[fig]
-            self.plots[fig].close()
+            # self.plots[fig].close()
+            plt.close(self.plots[fig].fig)
             self.plots[fig] = None
         
     def plot(self, data_index=None, data=None, fig=None, style='plot',
@@ -918,6 +1270,40 @@ class Project():
                     sens.append(fit.sens)
                     detect.append(fit.detect)
         print('Fitted {0} data objects'.format(count))
+        
+    def modes2bonds(self,includeOverall:bool=False,calcCC='auto'):
+        """
+        
+        Converts iRED mode detector responses into bond-specific detector 
+        responses, including calculation of cross-correlation matrices for each 
+        detector. These are stored in CC and CCnorm, where CC is the unnormalized
+        correlation and CCnorm is the correlation coefficient, i.e. Pearson's r
+        
+        Parameters
+        ----------
+        inclOverall : bool, optional
+            Determines whether to include the 3 or 5 overall modes of motion
+            (depends on rank). The default is False
+        calcCC : bool, optional
+            Usually modes2bonds is run after fitting the modes with detectors.
+            Then, cross correlation is only calculated for a few detectors. 
+            However, if run before fitting, then a large number of cross
+            correlation terms would be calculated. Therefore, by default, we only
+            calculate CC if there are less than 40 different detectors/time points.
+            Override this behavior by setting to True or False
+            The default is 'auto'.
+        
+        Returns
+        -------
+        None (appends data to project)
+        """
+        count = 0
+        for d in self:
+            if hasattr(d,'iRED') and 'Lambda' in d.iRED:
+                count+=1
+                d.modes2bonds()
+        print('Converted {0} iRED data objects from modes to bonds'.format(count))
+                
 
     #%% iPython stuff   
     def _ipython_display_(self):
@@ -936,6 +1322,11 @@ class Project():
             for v in getattr(self, k):
                 if v not in out:
                     out.append(v)
+        for v0 in self.short_files:
+            v=v0.rsplit('.',1)[0]
+            if v not in out:
+                out.append(v)
+            
         return out
  
 

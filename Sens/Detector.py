@@ -5,6 +5,7 @@ Created on Sat Nov 13 15:32:58 2021
 
 @author: albertsmith
 """
+import warnings
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -57,6 +58,31 @@ class Detector(Sens.Sens):
         else:
             return super().__eq__(ob)
     
+    def del_exp(self,index):
+        """
+        Deletes detectors from the detector object
+
+        Parameters
+        ----------
+        index : TYPE
+            DESCRIPTION.
+
+        Returns
+        -------
+        None.
+
+        """
+        if not(hasattr(self,'nowarn')):
+            print('Warning: Deleting detectors from the detector object will prevent fitting')
+        
+        i=np.ones(self.rhoz.shape[0],dtype=bool)
+        i[index]=False
+        self._Sens__rho=self.rhoz[i]
+        self._Sens__rhoCSA=self._rhoCSA()[i]
+        self.opt_pars['n']=i.sum()
+        self.info.del_exp(index)
+        
+    
     def copy(self):
         """
         Returns a deep copy of the detector object. Note that we do not deep-copy
@@ -91,6 +117,7 @@ class Detector(Sens.Sens):
         """
         Obtain the r matrix for fitting with detectors
         """
+        self.reload()
         assert self.__r is not None,"First optimize detectors (r_auto, r_target, r_no_opt)"
         
         if not(self.SVD.up2date):
@@ -104,13 +131,15 @@ class Detector(Sens.Sens):
         """
         if self.__r is None and self._Sens__rho is not None:
             opt_pars=copy(self.opt_pars)
-            inclS2='inclS2' in opt_pars
+            inclS2='inclS2' in opt_pars['options']
             R2ex='R2ex' in opt_pars
             target=self._Sens__rho[inclS2:-1] if R2ex else self._Sens__rho[inclS2:]
             
             self.r_target(target)
             if np.max(np.abs(target-self.rhoz))>1e-6:
                 print('Warning: Detector reoptimization failed')
+            self.opt_pars=copy(opt_pars)
+            self.opt_pars['options']=[]
             for o in opt_pars['options']:
                 getattr(self,o)()
             
@@ -262,7 +291,7 @@ class Detector(Sens.Sens):
         
         self.SVD(n)
         Vt=self.SVD.Vt
-
+        #todo add alternative for linux, because the scipy linalg is to slow -K
         """
         def linprog_cvxpy(Y):
             import cvxpy
@@ -461,6 +490,8 @@ class Detector(Sens.Sens):
         pars={'z0':np.nan,'zmax':self.z[np.argmax(self.rhoz[0])],'Del_z':np.nan,
                     'stdev':((np.linalg.pinv(self.__r)[0,:-1]**2)@self.sens.info['stdev']**2)**0.5}
         self.info.new_exper(**pars)
+        ne=len(self.info)
+        self.info._Info__values=self.info._Info__values.T[np.concatenate(([-1],np.arange(ne-1)))].T
     
     def removeS2(self):
         if self._islocked:return
@@ -539,6 +570,19 @@ class Detector(Sens.Sens):
                
         return hdl
 
+    def _hash(self):
+        #todo get rid of that later
+        return hash(self)
+    
+    def __hash__(self):
+        if 'n' not in self.opt_pars:   #Unoptimized set of detectors (hash not defined)
+            return hash(self.sens)
+        return hash(self.rhoz.tobytes())
+
+    # def __hash__(self):
+    #     warnings.warn("implement hash value for Detector!")
+    #     return 0
+
 class SVD():
     """
     Class responsible for performing and storing/returning the results of singular
@@ -599,6 +643,18 @@ class SVD():
         """
         if self._sens_hash is None or self._sens_hash!=self.sens._hash:return False
         return True
+    
+    def update(self):
+        """
+        Updates the SVD calculation in case the sensitivities have changed
+
+        Returns
+        -------
+        None.
+
+        """
+        if not(self.up2date):self(self.n)
+        
     
     def run(self,n):
         """

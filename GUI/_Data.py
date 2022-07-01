@@ -3,7 +3,7 @@ from pyDR.GUI.designer2py.data_widget import Ui_Data
 from PyQt5.QtWidgets import QListWidgetItem, QWidget, QFileDialog
 from pyDR.GUI.other.elements import openFileNameDialog, create_Figure_canvas, get_mainwindow, get_workingproject
 from pyDR.chimeraX.CMXRemote import CMXRemote
-
+from time import time, sleep
 from pyDR.IO import read_file, readNMR, isbinary
 import numpy as np
 import matplotlib.pyplot as plt
@@ -51,31 +51,16 @@ class Ui_Data_final(Ui_Data):
 
     def load_from_working_project(self) -> None:
         self.working_project = get_workingproject(self.parent)
-        #if self.working_project.titles:
-            #TODO the indexing of project and info gives very weird errors, when I try to use hasattr
-            # the solution right here is a little uncomfortable for me -K
+
         for title in self.working_project.titles:
             self.listWidget_dataobjects.addItem(title)
-            print(self.working_project[title][0].select)
+            if hasattr(self.working_project[title][0], "select") and getattr(self.working_project[title][0],"select") is not None:
+                self.comboBox_selectpdb.addItem(self.working_project[title][0].select.molsys.topo)
         #todo load pdbs and add to combobox
         #todo load selection for pdb and add a combobox
 
     def open_chimerax(self) -> None:
-        pdb = self.comboBox_selectpdb.currentText()
-        pdb = "2kj3"
-        #assert len(pdb), "select a valid pdb file"
-
-        id = CMXRemote.launch([f"open {pdb}",
-                               "del ~#1.1",
-                               "show",
-                               "hide H",
-                               "~ribbon"])
-        from time import time,sleep
-        sleep(5)
-
-        CMXRemote.add_event(id,"Detectors",
-                            {"ids" : np.arange(10), "R" : np.random.random((10, 3))})
-
-        #todo launch chimerax
-        #todo launch detector canvas event
+        dataset = self.listWidget_dataobjects.currentIndex().row()
+        scale = self.doubleSpinBox_scaling.value()
+        self.working_project[dataset].chimera(scaling=scale)
 

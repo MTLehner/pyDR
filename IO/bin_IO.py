@@ -52,12 +52,14 @@ def write_file(filename,ob,overwrite=False):
             write_Sens(f,ob)
         elif object_class=="Data":
             write_Data(f,ob)
+        elif object_class=='Data_iRED':
+            write_Data_iRED(f,ob)
         elif object_class=='Source':
             write_Source(f,ob)
             
 def read_file(filename:str,directory:str='')->object:
     with open(filename,'rb') as f:
-        l=decode(f.readline())[:-1]
+        l=decode(f.readline()).strip()
         if l=='OBJECT:INFO':
             return read_Info(f)
         if l=='OBJECT:NUMPY':
@@ -68,6 +70,10 @@ def read_file(filename:str,directory:str='')->object:
             return read_Detector(f)
         if l=='OBJECT:DATA':
             out=read_Data(f,directory=directory)
+            out.source.saved_filename=os.path.abspath(filename)
+            return out
+        if l=='OBJECT:DATA_IRED':
+            out=read_Data_iRED(f)
             out.source.saved_filename=os.path.abspath(filename)
             return out
         if l=='OBJECT:MOLSELECT':
@@ -268,11 +274,71 @@ def read_Data(f,directory:str=''):
     data.detect=detect
     return data
 
+def write_Data_iRED(f,data):
+    flds=['R','Rstd','S2','S2std','CC','totalCC']
+    f.write(b'OBJECT:DATA_IRED\n')
+    if data.detect is None:data.detect=Sens.Detector(data.sens)
+    write_Detector(f,data.detect)
+    write_Source(f,data.source)    
+    
+    f.write(b'LABEL\n')
+    np.save(f,data.label,allow_pickle=False)
+    f.write(b'END:LABEL\n')
+    
+    f.write(b'IREDdict\n')
+    if len(data.iRED.keys()):
+        for k in ['rank','M','m','Lambda']:
+            f.write(bytes('{0}\n'.format(k),'utf-8'))
+            np.save(f,data.iRED[k],allow_pickle=False)
+    f.write(b'END:IREDdict\n')
+    
+    for k in flds:
+        if hasattr(data,k) and getattr(data,k) is not None:
+            f.write(bytes('{0}\n'.format(k),'utf-8'))
+            np.save(f,getattr(data,k),allow_pickle=False)
+    f.write(b'END:OBJECT\n')
+    
+def read_Data_iRED(f,directory:str=''):
+    flds=['R','Rstd','S2','S2std','Rc','CC','totalCC']
+    line=decode(f.readline())[:-1]
+    if line!='OBJECT:DETECTOR':print('Warning: First entry of data object should be the detector')
+    detect=read_Detector(f)
+    assert decode(f.readline())[:-1]=='OBJECT:SOURCE','Source entry not initiated correctly'
+    source=read_Source(f,directory=directory)
+
+    if decode(f.readline())[:-1]!='LABEL':print('Warning: Data label is missing')
+    kwargs={}
+    kwargs['label']=np.load(f,allow_pickle=False)
+    if decode(f.readline())[:-1]!='END:LABEL':print('Warning: Data label terminated incorrectly')
+    
+    if decode(f.readline()).strip()!='IREDdict':print('Warning: IREDdict missing')
+    line=decode(f.readline()).strip()
+    iRED={}
+    while line!='END:IREDdict':
+        iRED[line]=np.load(f,allow_pickle=False)
+        line=decode(f.readline()).strip()
+    
+    for l in f:
+        k=decode(l)[:-1]
+        if k=='END:OBJECT':break
+        if k in flds:
+            kwargs[k]=np.load(f,allow_pickle=False)
+    
+    kwargs['sens']=detect.sens
+    data=clsDict['Data_iRED'](**kwargs)
+    data.source=source
+    data.detect=detect
+    data.iRED=iRED
+    return data
+
 def write_Source(f,source):
     f.write(b'OBJECT:SOURCE\n')
     flds=['Type','filename','saved_filename','_title','status','n_det','additional_info']
     for fld in flds:
         f.write(bytes('{0}:{1}\n'.format(fld,getattr(source,fld)),'utf-8'))
+    f.write(b'Details\n')
+    for l in source.details:
+        f.write(bytes(l+'\n','utf-8'))
     if source._src_data is not None:    #Check _src_data, not src_data, because src_data will re-load the data object!!
         f.write(b'src_data\n')
         if isinstance(source._src_data,str):
@@ -295,7 +361,14 @@ def read_Source(f,directory:str=''):
         if fld=='filename' and v[0]=='[' and v[-1]==']':
             v=v[2:-2].split(',')
         setattr(source,fld,int(v) if fld=='n_det' else v)
-    line=decode(f.readline())[:-1]
+    line=decode(f.readline()).strip()
+    if line=='Details':
+        details=list()
+        line=decode(f.readline()).strip()
+        while line not in ['src_data','OBJECT:MOLSELECT','END:OBJECT']:
+            details.append(line)
+            line=decode(f.readline()).strip()
+        source.details=details
     if line=='src_data':
         line=decode(f.readline())[:-1]
         if line=='OBJECT:DATA':

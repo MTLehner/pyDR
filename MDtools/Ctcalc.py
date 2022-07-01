@@ -123,7 +123,7 @@ dtypec=Defaults['dtype_complex']
 A few notes on Fourier transforms and correlation functions
     1) The FT of a real signal is Hermitian
     2) The complex conjugate of a Hermitian FT remains Hermitian
-    3) The project of two Hermitian FTs is still Hermitian
+    3) The product of two Hermitian FTs is still Hermitian
     4) The IFT of a Hermitian signal is real
     5) The addition of an imaginary multiplier results in an FT that is
     antihermitian
@@ -440,6 +440,9 @@ class Ctcalc():
         self.c=list()
         self.CtFT=list()
         self.Ct=list()
+        self.aEq=None   #Storage for the equilibrium values
+        self.bEq=list() #Storage for the equilibrium values      
+        self.Eq=list()  #Storage for the equilibrium values 
         self[1]
 
 #%% Functions for sparse sampling

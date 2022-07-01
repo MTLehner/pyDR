@@ -14,7 +14,8 @@ from pyDR.chimeraX.chimeraX_funs import get_path,py_line,WrCC,chimera_path,run_c
 from threading import Thread
 from time import time,sleep
 from platform import platform
-from subprocess import Popen
+from subprocess import Popen,check_output,DEVNULL
+from pyDR import clsDict
 
 #%% Functions to run in pyDR
 class CMXRemote():
@@ -30,6 +31,7 @@ class CMXRemote():
     #%% Open and close chimeraX instances
     @classmethod
     def launch(cls,commands=None):
+        cls.cleanup()
         if True in cls.closed:
             ID=np.argwhere(cls.closed)[0,0]
         else:
@@ -81,11 +83,17 @@ class CMXRemote():
     
     
     @classmethod
+    def cleanup(cls):
+        for k in range(len(cls.PIDs)):
+            if cls.conn[k] is None or cls.conn[k].closed:
+                cls.kill(k)
+    
+    @classmethod
     def kill(cls,ID):
         if ID=='all':
             for k,P in enumerate(cls.PIDs):
                 os.system('kill {0}'.format(P))
-        elif cls.PIDs[ID]!=0:
+        elif cls.PIDs[ID]!=0 and cls.PIDs[ID] is not None:
             os.system('kill {0}'.format(cls.PIDs[ID]))
             if len(cls.closed)>ID and cls.closed[ID] is not None:
                 cls.closed[ID]=True
@@ -156,8 +164,24 @@ class CMXRemote():
             DESCRIPTION.
 
         """
-        string=string.replace(' ','+')
-        return os.system('curl http://127.0.0.1:{0}/run?command={1}'.format(cls.rc_port0+ID,string))
+        # string=string.replace(' ','+')
+        
+        #Entries in encoding were obtained at https://meyerweb.com/eric/tools/dencoder/. 
+        #If additional symbols cause problems, please add them to the encoding dictionary
+        
+        #The % has to come first because all the other signs will introduce a %
+        encoding={'%':'%25','@':'%40','#':'%23','$':'%24','^':'5E','&':'%26',
+                  '[':'%5B',']':'%5D','{':'%7B','}':'%7D','"':'%22',"'":'%27',
+                  ' ':'+'}
+        
+        for k,v in encoding.items():
+            string=string.replace(k,v)
+
+        out = check_output('curl http://127.0.0.1:{0}/run?command={1}'.format(cls.rc_port0+ID,string),shell=True,
+                            stderr=DEVNULL)
+
+        return out
+        # return os.system('curl http://127.0.0.1:{0}/run?command={1}'.format(cls.rc_port0+ID,string))
     
     @classmethod
     def py_command(cls,ID:int,string:str) -> None:
@@ -186,7 +210,12 @@ class CMXRemote():
     def command_line(cls,ID:int,string:str) -> None:
         """
         Send a command to be executed on the ChimeraX command line, but via 
-        run_command in the python interface (why do we have this?)
+        run_command in the python interface.
+        
+        At the moment, this is necessary because using run() from within the
+        event loop crashes chimeraX and using curl seems not to transfer certain
+        characters correctly. Probably, the latter problem can be solved. I
+        suspect the former cannot be– A.S.
 
         Parameters
         ----------
@@ -227,7 +256,37 @@ class CMXRemote():
         """
         cls.send_command(ID,'open {0}'.format(cls.full_path(ID)))
 #        cls.conn[ID].send(('command_line','open {}'.format(cls.full_path(ID))))
-    
+
+
+#%% Non-event actions
+    @classmethod
+    def show_sel(cls,ID:int,ids:np.ndarray,color:tuple=(1.,0.,0.,1.)):
+        """
+        Highlight a selection of atoms by id in ChimeraX. Provide the chimeraX
+        session ID, an array of ids (numpy integer array), and optionally a
+        color tuple (3 or 4 elements, 0 to 1 or 0 to 255)
+
+        Parameters
+        ----------
+        ID : int
+            ChimeraX session ID.
+        ids : np.ndarray
+            Selection ids.
+        color : tuple, optional
+            Color to use. The default is (1,0,0,1).
+
+        Returns
+        -------
+        None.
+
+        """
+        if np.max(color)<=1 and not(isinstance(color[0],int)):
+            color=[int(c*255) for c in color]
+        else:
+            color=[int(c) for c in color]
+        if len(color)==3:
+            color.append(255)
+        cls.conn[ID].send(('show_sel',ids,color))
 #%% Event handling
     @classmethod
     def add_event(cls,ID,name,*args):
@@ -256,6 +315,69 @@ class CMXRemote():
         while time()-t0<1:
             if tr.response:
                 return tr.response
+#%% Various queries    
+    @classmethod
+    def how_many_models(cls,ID:int)->int:
+        """
+        Queries chimeraX to determine how many atom-containing models are 
+        currently loaded in chimeraX.
+    
+
+        Parameters
+        ----------
+        ID : int
+            ID of chimeraX session.
+
+        Returns
+        -------
+        int
+            How many models currently open in chimeraX
+
+        """
+        try:
+            cls.conn[ID].send(('how_many_models',))
+        except:
+            print('Connection failed')
+            return None
+        tr=Listen(cls.conn[ID])
+        tr.start()
+        t0=time()
+        while time()-t0<1:
+            if tr.response:
+                return tr.response
+        return 0
+    
+    @classmethod
+    def valid_models(cls,ID:int)->list:
+        """
+        Queries chimeraX to determine what models with atoms are open.
+    
+
+        Parameters
+        ----------
+        ID : int
+            ID of chimeraX session.
+
+        Returns
+        -------
+        list
+            List of valid model indices
+
+        """
+        try:
+            cls.conn[ID].send(('valid_models',))
+        except:
+            print('Connection failed')
+            return None
+        tr=Listen(cls.conn[ID])
+        tr.start()
+        t0=time()
+        while time()-t0<1:
+            if tr.response:
+                return tr.response
+        return 0
+                    
+    
 #%% Thread handling        
 class Listen(Thread):
     def __init__(self,conn):
@@ -282,5 +404,6 @@ class File():
     def __exit__(self,exception_type, exception_value, traceback):
         self.file.close()
 
-
+from pyDR.misc.disp_tools import NiceStr
+clsDict[0]=NiceStr('pyDIFRATE')
         

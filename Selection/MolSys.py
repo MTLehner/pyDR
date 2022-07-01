@@ -6,11 +6,11 @@ Created on Mon Dec  6 13:34:36 2021
 @author: albertsmith
 """
 import numpy as np
-from MDAnalysis import Universe,AtomGroup
+from MDAnalysis import Universe, AtomGroup
 from pyDR.misc.ProgressBar import ProgressBar
 from pyDR.Selection import select_tools as selt
 from pyDR.MDtools.vft import pbc_corr
-from pyDR import Defaults
+from pyDR import Defaults,clsDict
 from copy import copy
 import os
 dtype=Defaults['dtype']
@@ -19,7 +19,39 @@ class MolSys():
     """
     Object for storage of the molecule or MD trajectory
     """
-    def __init__(self,topo=None,traj_files=None,t0=0,tf=-1,step=1,dt=None):
+    def __init__(self,topo:str,traj_files:list=None,t0:int=0,tf:int=None,step:int=1,dt:float=None,project=None):
+        """
+        Generates a MolSys object, potentially with a trajectory attached, in
+        case traj_files is specified. Note that if the topology provided does
+        not include positions (.psf, for exampe), then you must provide
+        traj_files for viewing purposes.
+
+        Parameters
+        ----------
+        topo : str
+            Location of the topology file (pdb,psf, etc). The default is None.
+        traj_files : str or list of strs, optional
+            Location(s) of trajectory. The default is None.
+        t0 : int, optional
+            First time point to use in the trajectory. The default is 0.
+        tf : int, optional
+            Last time point to use in the trajectory. Set to None to go to the 
+            end of the trajectory. The default is None.
+        step : int, optional
+            Step size to skip frames in trajectory. Set to 1 for all frames.
+            The default is 1.
+        dt : float, optional
+            Overrides the saved timestep in the MD trajectory (ps). Set to None
+            to use the saved timestep. The default is None.
+        project : pyDR.Project, optional
+            Attach a Project object to this MolSys, such that data generated from
+            this MolSys will be attached to the project. The default is None.
+
+        Returns
+        -------
+        MolSys.
+
+        """
         if traj_files is not None and not(isinstance(traj_files,list) and len(traj_files)==0):
             if isinstance(traj_files,list):
                 traj_files=[os.path.abspath(tf) for tf in traj_files]
@@ -32,8 +64,11 @@ class MolSys():
             self._uni=None
             self._traj=None
             return
+        
         self._traj=Trajectory(self.uni.trajectory,t0=t0,tf=tf,step=step,dt=dt) \
-            if hasattr(self.uni,'trajectory') else None     
+            if hasattr(self.uni,'trajectory') else None
+                
+        self.project=project
     
     @property
     def uni(self):
@@ -46,25 +81,129 @@ class MolSys():
     @property
     def topo(self):
         return self.uni.filename
+
+    @property
+    def details(self):
+        out=['Topology: {}'.format(self.topo)]
+        out.extend(self.traj.details)
+        return out
+
+
+    @property
+    def _hash(self):
+        return hash(self.topo)
+
+    @property
+    def select_atoms(self):
+        """
+        Quick link to the MDAnalysis universe select_atoms function. 
+
+        Returns
+        -------
+        function
+            MDAnalysis select_atoms called from the full universe.
+        """
+        return self.uni.atoms.select_atoms
+    
+    def select_filter(self,resids=None,segids=None,filter_str=None) -> AtomGroup:
+        """
+        Create a selection from the MolSys universe based on filtering by
+        resid, segid, and a filter string.        
+
+        Parameters
+        ----------
+        resids : list/array/single element, optional
+            Restrict selected residues. The default is None.
+        segids : list/array/single element, optional
+            Restrict selected segments. The default is None.
+        filter_str : str, optional
+            Restricts selection to atoms selected by the provided string. String
+            is applied to the MDAnalysis select_atoms function. The default is None.
+
+        Returns
+        -------
+        AtomGroup
+            DESCRIPTION.
+
+        """
+        return selt.sel_simple(self.uni.atoms,resids=resids,segids=segids,filter_str=filter_str)
+
+    def __hash__(self):
+        return hash(self.topo) + hash(self.traj)
+    
+    def chimera(self):
+        """
+        Opens the molecule in Chimera for viewing
+
+        Returns
+        -------
+        None.
+
+        """
+        
+        CMXRemote=clsDict['CMXRemote']
+
+        if self.project is not None:
+            ID=self.project.chimera.CMXid
+            if ID is None:
+                self.project.chimera.current=0
+                ID=self.project.chimera.CMXid
+        else: #Hmm....how should this work?
+            ID=CMXRemote.launch()
+
+
+        CMXRemote.send_command(ID,'open "{0}" maxModels 1'.format(self.topo))
+        mn=CMXRemote.valid_models(ID)[-1]
+        CMXRemote.command_line(ID,'sel #{0}'.format(mn))
+
+        CMXRemote.send_command(ID,'style sel ball')
+        CMXRemote.send_command(ID,'size sel stickRadius 0.2')
+        CMXRemote.send_command(ID,'size sel atomRadius 0.8')
+        # CMXRemote.send_command(ID,'~ribbon')
+        # CMXRemote.send_command(ID,'show sel')
+        # CMXRemote.send_command(ID,'color sel tan')
+        CMXRemote.send_command(ID,'~sel')
+        
+        if self.project is not None and self.project.chimera.saved_commands is not None:
+            for cmd in self.project.chimera.saved_commands:
+                CMXRemote.send_command(ID,cmd)
+    
         
 
-
 class Trajectory():
-    def __init__(self,mda_traj,t0=0,tf=-1,step=1,dt=None):
+    def __init__(self,mda_traj,t0=0,tf=None,step=1,dt=None):
         self.t0=t0
         self.__tf=len(mda_traj)
-        self.tf=tf
+        self.tf=tf if tf is not None else self.__tf
         self.step=step
         self.__dt=dt if dt else mda_traj.dt
         self.mda_traj=mda_traj
         self.ProgressBar=False
-            
+
+    def __hash__(self):
+        return hash(self.t0) + hash(self.tf) + hash(self.step) + hash(self.dt)
+
     @property
     def dt(self):
         return self.__dt*self.step
     
+    @property
+    def time(self):
+        return self.mda_traj.time
+    
+    @property
+    def details(self):
+        out=['Trajectory:'+', '.join(self.files)]
+        out.append('t0={0}, tf={1}, step={2}, dt={3} ps, original length={4}'.format(self.t0,self.tf,self.step,self.dt,self.__tf))
+        return out
+
     def __setattr__(self,name,value):
         "Make sure t0, tf, step are integers"
+        if name=='project': #Ensure project is really a project
+            if value is None or str(value.__class__).split('.')[-1][:-2]=='Project':
+                super().__setattr__(name, value)
+            return
+        
         if name in ['t0','tf','step']:
             value=int(value)
         if name=='tf':
@@ -111,18 +250,57 @@ class Trajectory():
     @property
     def files(self):
         if hasattr(self.mda_traj,'filenames'):
-            return self.mda_traj.filenames
+            return [f for f in self.mda_traj.filenames] #Always return a list
         else:
             return [self.mda_traj.filename] #Always return a list
     
 class MolSelect():
-    def __init__(self,molsys):
+    def __init__(self,molsys:MolSys=None,topo:str=None,traj_files:list=None,t0:int=0,tf:int=None,step:int=1,dt:float=None,project=None):
+        """
+        Provide either a MolSys object, or provide a topology file (usually pdb)
+        to generate a selection (MolSelect) object. 
+
+        Parameters
+        ----------
+        molsys : MolSys, optional
+            Provide a MolSys directly, or provide location of a topology, such
+            that MolSys is generated upon initialization.
+        topo : str, optional
+            Location of the topology file (pdb,psf, etc). The default is None.
+        traj_files : str or list of strs, optional
+            Location(s) of trajectory. The default is None.
+        t0 : int, optional
+            First time point to use in the trajectory. The default is 0.
+        tf : int, optional
+            Last time point to use in the trajectory. Set to None to go to the 
+            end of the trajectory. The default is None.
+        step : int, optional
+            Step size to skip frames in trajectory. Set to 1 for all frames.
+            The default is 1.
+        dt : float, optional
+            Overrides the saved timestep in the MD trajectory (ps). Set to None
+            to use the saved timestep. The default is None.
+        project : pyDR.Project, optional
+            Attach a Project object to this MolSys, such that data generated from
+            this MolSys will be attached to the project. The default is None.
+
+        Returns
+        -------
+        None.
+
+        """
+        assert not(molsys is None and topo is None),'Either molsys or topo must be provided'
+        
+        if molsys is None:
+            molsys=MolSys(topo=topo,traj_files=traj_files,t0=t0,tf=tf,step=step,dt=dt,project=project)
+        
         super().__setattr__('molsys',molsys)
-        self.sel1=None
-        self.sel2=None
+        self._sel1=None
+        self._sel2=None
         self._repr_sel=None
         self._label=None
-    
+        self._project=None
+        super().__setattr__('_mdmode',False)
 
     def __setattr__(self,name,value):
         """
@@ -132,27 +310,84 @@ class MolSelect():
             print('Warning: Changing {} is not allowed'.format(name))
             return
         
+        if name=='project':
+            if value is None or str(value.__class__).split('.')[-1][:-2]=='Project':
+                self._project=value
+            return
+        
         if name=='label':
             super().__setattr__('_label',value)
             return
         
+        if name=='_mdmode':
+            if value==True and not(self._mdmode):
+                if (self._sel1 is not None and np.any([len(s)!=1 for s in self._sel1])) or \
+                    (self._sel2 is not None and np.any([len(s)!=1 for s in self._sel2])):
+                    print('mdmode only valid for single bond selections')
+                    return
+                for f in ['_sel1','_sel2']:
+                    sel0=getattr(self,f)
+                    if sel0 is not None:
+                        sel=sel0[0][:0]
+                        for s in sel0:
+                            sel+=s
+                            setattr(self,f,sel)
+            elif value==False and self._mdmode:
+                if self._sel1 is not None:
+                    sel1=np.zeros(len(self._sel1),dtype=object)
+                    for k in range(len(self._sel1)):sel1[k]=self._sel1[k:k+1]
+                    self._sel1=sel1
+                if self._sel2 is not None:
+                    sel2=np.zeros(len(self._sel2),dtype=object)
+                    for k in range(len(self._sel2)):sel2[k]=self._sel2[k:k+1]
+                    self._sel2=sel2
+                    
         if name=='repr_sel':
             if self.sel1 is not None and len(self.sel1)!=len(value):
                 print('Warning: length of sel1 and repr_sel are not equal. This will cause errors in ChimeraX')
-        if name in ['sel1','sel2','repr_sel'] and value is not None:
-            if name=='repr_sel':name='_repr_sel'
-            if isinstance(value,AtomGroup):
-                super().__setattr__(name,value)
+        if name in ['sel1','sel2','repr_sel']:
+            # if name=='repr_sel':name='_repr_sel'
+            _mdmode=self._mdmode
+            self._mdmode=False
+            name='_'+name
+            if value is None:
+                return
+            elif isinstance(value,AtomGroup):
+                sel=np.zeros(len(value),dtype=object)
+                for k in range(len(value)):sel[k]=value[k:k+1]
+                super().__setattr__(name,sel)
             elif isinstance(value,str):
                 super().__setattr__(name,self.uni.select_atoms(value))
             else:
                 out=np.zeros(len(value),dtype=object)
                 for k,v in enumerate(value):out[k]=v
                 super().__setattr__(name,out)
+            self._mdmode=_mdmode
             return
         
         super().__setattr__(name,value)
-        
+    
+    @property
+    def sel1(self):
+        return self._sel1
+    
+    @property
+    def sel2(self):
+        return self._sel2
+            
+    @property
+    def project(self):
+        """
+        Returns the associated project if one exists
+
+        Returns
+        -------
+        Project
+            pyDR Project object
+
+        """
+        return self._project if self._project else self.molsys.project
+    
     def __copy__(self):
         cls = self.__class__
         out = cls.__new__(cls)
@@ -162,7 +397,7 @@ class MolSelect():
         return out
         
         
-    def select_bond(self,Nuc=None,resids=None,segids=None,filter_str=None,label=None):
+    def select_bond(self,Nuc,resids=None,segids=None,filter_str:str=None,label=None) -> None:
         """
         Select a bond according to 'Nuc' keywords
             '15N','N','N15': select the H-N in the protein backbone
@@ -172,24 +407,58 @@ class MolSelect():
                 (ivl: ILE,VAL,LEU, ivla: ILE,LEU,VAL,ALA, ch3: all methyl groups)
                 (e.g. ivl1: only take one bond per methyl group)
                 (e.g. ivlr,ivll: Only take the left or right methyl group)
+        
+        Note that it is possible to provide a list of keywords for Nuc in order
+        to simultaneously evaluate multiple bond types. In this case, sorting
+        will be such that bonds from the same residues/segments are grouped 
+        together.
+
+        Parameters
+        ----------
+        Nuc : str or list, optional
+            Nucleus keyword or list of keywords. 
+        resids : list/array/single element, optional
+            Restrict selected residues. The default is None.
+        segids : list/array/single element, optional
+            Restrict selected segments. The default is None.
+        filter_str : str, optional
+            Restricts selection to atoms selected by the provided string. String
+            is applied to the MDAnalysis select_atoms function. The default is None.
+        label : list/array, optional
+            Manually provide a label for the selected bonds. The default is None.
+
+        Returns
+        -------
+        None.
+
         """
-        self.sel1,self.sel2=selt.protein_defaults(Nuc=Nuc,mol=self,resids=resids,segids=segids,filter_str=filter_str)
+        
+        if isinstance(Nuc,list):
+            sel1,sel2=self.uni.atoms[:0],self.uni.atoms[:0] #Create empty selection
+            for Nuc0 in Nuc:
+                sel10,sel20=selt.protein_defaults(Nuc=Nuc0,mol=self,resids=resids,segids=segids,filter_str=filter_str)
+                sel1+=sel10
+                sel2+=sel20
+            i=np.lexsort([sel1.names,sel2.names,sel1.resids,sel1.segids])
+            self.sel1,self.sel2=sel1[i],sel2[i]
+                
+        else:
+            self.sel1,self.sel2=selt.protein_defaults(Nuc=Nuc,mol=self,resids=resids,segids=segids,filter_str=filter_str)
         
         repr_sel=list()        
-        if Nuc.lower() in ['15n','n15','n','co','13co','co13','ca','13ca','ca13']:
+        if hasattr(Nuc,'lower') and Nuc.lower() in ['15n','n15','n','co','13co','co13']:
             for s in self.sel1:
-                repr_sel.append(s.residue.atoms.select_atoms('name H HN N CA'))
-                resi=s.residue.resindex-1
-                if resi>=0 and self.uni.residues[resi].segid==s.segid:
-                    repr_sel[-1]+=self.uni.residues[resi].atoms.select_atoms('name C CA')
-        elif Nuc.lower()[:3] in ['ivl','ch3'] and '1' in Nuc:
+                repr_sel.append(s.residues[0].atoms.select_atoms('name H HN N CA'))
+                resi=s.residues[0].resindex-1
+                if resi>=0 and self.uni.residues[resi].segid==s[0].segid:
+                    repr_sel[-1]+=self.uni.residues[resi].atoms.select_atoms('name C CA O')
+        elif hasattr(Nuc,'lower') and Nuc.lower()[:3] in ['ivl','ch3'] and '1' in Nuc:
             for s in self.sel1:
-                repr_sel.append(s+s.residue.atoms.select_atoms('name H* and around 1.4 name {}'.format(s.name)))
+                repr_sel.append(s+s.residues[0].atoms.select_atoms('name H* and around 1.4 name {}'.format(s.name)))
         else:
             for s1,s2 in zip(self.sel1,self.sel2):
                 repr_sel.append(s1+s2)
         self.repr_sel=repr_sel
-            
         self.set_label(label)
 
     @property
@@ -208,6 +477,16 @@ class MolSelect():
                 self.repr_sel=[s0 for s0 in self.sel1]
         return self._repr_sel
     
+    @property
+    def details(self):
+        out=self.molsys.details
+        if len(self):
+            out.append('Selection with {0} elements'.format(len(self)))
+            out.append('Selection labels: '+', '.join([str(l) for l in self.label]))
+        return out
+
+
+
     def set_selection(self,i,sel=None,resids=None,segids=None,fitler_str=None):
         """
         Define sel2 and sel2 separately. The first argument is 0 or 1, depending on
@@ -265,7 +544,7 @@ class MolSelect():
     
     @property
     def v(self):
-        assert self.sel1 is not None and self.sel2 is not None,'vec requires both sel2 and sel2 to be defined'
+        assert self.sel1 is not None and self.sel2 is not None,'vec requires both sel1 and sel2 to be defined'
         if hasattr(self.sel1[0],'__len__') and hasattr(self.sel2[0],'__len__'):
             out=np.array([s0.positions.mean(0)-s1.positions.mean(0) for s0,s1 in zip(self.sel1,self.sel2)])
         elif hasattr(self.sel1[0],'__len__'):
@@ -289,52 +568,69 @@ class MolSelect():
     def set_label(self,label=None):
         "We attempt to generate a unique label for this selection, while having labels of minimum length"
         if label is None:
+            try: #TODO kinda hack-y. Not too pleased with this.
+                mdmode=self._mdmode
+                self._mdmode=True
+            except:
+                self.label=np.arange(len(self.sel1))
+                self._mdmode=mdmode
+                
             "An attempt to generate a unique label under various conditions"
-            if hasattr(self.sel1[0],'__len__'):
-                label=list()
-                for s in self.sel1:     #See if each atom group corresponds to a single residue
-                    if np.unique(s.resids).__len__()==1:
-                        label.append(s.resids[0])
-                    else:               #If more than residue, then
-                        break
-                else:
-                    label=np.array(label)
-                    if np.unique(label).size==label.size:   #Keep this label if all labels are unique
-                        self.label=np.array(label)
-                        return
-                
-                label=list()
-                for s in self.sel1:     #See if each atom group corresponds to a single segment
-                    if np.unique(s.segids).__len__()==1:
-                        label.append(s.segids[0])
-                    else:               #If more than residue, then
-                        break
-                else:
-                    
-                    label=np.array(label)
-                    if np.unique(label).size==label.size:
-                        self.label=np.array(label)
-                        return
-                self.label=np.arange(self.sel1.__len__())
-                
-            else:
-                count,cont=0,True
-                while cont:
-                    if count==0: #One bond per residue- just take the residue number
-                        label=self.sel1.resids  
-                    elif count==1: #Multiple segments with same residue numbers
-                        label=np.array(['{0}_{1}'.format(s.segid,s.resid) for s in self.sel1])
-                    elif count==2: #Same segment, but multiple bonds on the same residue (include names)
-                        label=np.array(['{0}_{1}_{2}'.format(s1.resid,s1.name,s2.name) for s1,s2 in zip(self.sel1,self.sel2)])
-                    elif count==3: #Multiple bonds per residue, and multiple segments
-                        label=np.array(['{0}_{1}_{2}_{3}'.format(s1.segid,s1.resid,s1.name,s2.name) \
-                                        for s1,s2 in zip(self.sel1,self.sel2)])
-                    "We give up after this"
-                    count+=1
-                    if np.unique(label).size==label.size or count==4:
-                        cont=False
-                    
-                self.label=label
+            if hasattr(self, "sel1") and getattr(self,"sel1") is not None\
+               and hasattr(self, "sel2") and getattr(self, "sel2") is not None: #QUICKFIX
+              
+               if hasattr(self.sel1[0],'__len__'):
+                  #todo this here is causing the saving to crash when sel1 or sel2 is None, i make a quick fix to avoid it,
+                  #  but i think it needs a more detailed view
+                  label=list()
+                  for s in self.sel1:     #See if each atom group corresponds to a single residue
+                      if s is None:
+                          continue
+                      elif np.unique(s.resids).__len__()==1:
+                          label.append(s.resids[0])
+                      else:               #If more than residue, then
+                          break
+                  else:
+                      label=np.array(label)
+                      if np.unique(label).size==label.size:   #Keep this label if all labels are unique
+                          self.label=np.array(label)
+                          return
+                  
+                  label=list()
+                  for s in self.sel1:     #See if each atom group corresponds to a single segment
+                      if s is None:
+                          continue
+                      elif np.unique(s.segids).__len__()==1:
+                          label.append(s.segids[0])
+                      else:               #If more than residue, then
+                          break
+                  else:
+                      
+                      label=np.array(label)
+                      if np.unique(label).size==label.size:
+                          self.label=np.array(label)
+                          return
+                  self.label=np.arange(self.sel1.__len__())
+                  
+               else:
+                  count,cont=0,True
+                  while cont:
+                      if count==0: #One bond per residue- just take the residue number
+                          label=self.sel1.resids  
+                      elif count==1: #Multiple segments with same residue numbers
+                          label=np.array(['{0}_{1}'.format(s.segid,s.resid) for s in self.sel1])
+                      elif count==2: #Same segment, but multiple bonds on the same residue (include names)
+                          label=np.array(['{0}_{1}_{2}'.format(s1.resid,s1.name,s2.name) for s1,s2 in zip(self.sel1,self.sel2)])
+                      elif count==3: #Multiple bonds per residue, and multiple segments
+                          label=np.array(['{0}_{1}_{2}_{3}'.format(s1.segid,s1.resid,s1.name,s2.name) \
+                                          for s1,s2 in zip(self.sel1,self.sel2)])
+                      "We give up after this"
+                      count+=1
+                      if np.unique(label).size==label.size or count==4:
+                          cont=False
+                      
+                  self.label=label
+            self._mdmode=mdmode
         
     def copy(self):
         return copy.copy(self)
@@ -409,14 +705,13 @@ class MolSelect():
                         id0.append((s1.segid,s1.resid,s1.name))
             if mode=='a3':
                 id1,id2=[[x[1:] for x in id0] for id0 in [id1,id2]]
-        
 
         in12=list()
         for i in id1:
-            in12.append(np.any([np.array_equal(i,i1) for i1 in id2]))
+            in12.append(np.any([np.array_equal(np.sort(i),np.sort(i1)) for i1 in id2]))
         in12=np.argwhere(in12)[:,0]
         
-        in21=np.array([(np.argwhere([np.array_equal(id1[k],i2) for i2 in id2])[0,0]) for k in in12])
+        in21=np.array([(np.argwhere([np.array_equal(np.sort(id1[k]),np.sort(i2)) for i2 in id2])[0,0]) for k in in12])
             
             
         # in21=np.array([np.argwhere([id1[k]==i2 for i2 in id2])[0,0] for k in in12])
@@ -427,6 +722,90 @@ class MolSelect():
         if sel is self:return True
         in21=self.compare(sel,mode='auto')[1]
         return len(in21)==len(self) and np.all(in21==np.sort(in21))
-                
+
+    def chimera(self,color:tuple=(1.,0.,0.,1.),x:np.array=None,norm:bool=False,repr_sel=False):
+        """
+        Opens the molecule in chimera. One may either highlight the selection
+        (optionally provide color) or one may plot some data onto the molecule,
+        provided by a parameter, x. 
+
+        Parameters
+        ----------
+        color : tuple, optional
+            Color for the selection. The default is (1.,0.,0.,1.).
+        x : TYPE, optional
+            Parameter to encode onto the molecule. Length should match the length
+            of the selection object. Typically, x is normalized to a maximum
+            of 1, although this is not requred. The default is None.
+        norm : bool, optional
+            Determine whether to renormalize x, such that it spans from 0 to 1.
+
+        Returns
+        -------
+        None.
+
+        """
+        
+        CMXRemote=clsDict['CMXRemote']
+
+        if self.project is not None:
+            ID=self.project.chimera.CMXid
+            if ID is None:
+                self.project.chimera.current=0
+                ID=self.project.chimera.CMXid
+        else: #Hmm....how should this work?
+            ID=CMXRemote.launch()
+
+
+        CMXRemote.send_command(ID,'open "{0}" maxModels 1'.format(self.molsys.topo))
+        mn=CMXRemote.valid_models(ID)[-1]
+        CMXRemote.command_line(ID,'sel #{0}'.format(mn))
+
+        CMXRemote.send_command(ID,'style sel ball')
+        CMXRemote.send_command(ID,'size sel stickRadius 0.2')
+        CMXRemote.send_command(ID,'size sel atomRadius 0.8')
+        CMXRemote.send_command(ID,'~ribbon')
+        CMXRemote.send_command(ID,'show sel')
+        CMXRemote.send_command(ID,'color sel tan')
+        CMXRemote.send_command(ID,'~sel')
+        
+        if self.project is not None and self.project.chimera.saved_commands is not None:
+            for cmd in self.project.chimera.saved_commands:
+                CMXRemote.send_command(ID,cmd)
+        
+        if self.sel1 is not None:
+            ids=np.concatenate([s.indices for s in (self.repr_sel if repr_sel else [*self.sel1,*self.sel2])],dtype=int)
+        
+        if x is None:
+            CMXRemote.show_sel(ID,ids=ids,color=color)
+        else:
+            assert len(x)==len(self),'Length of x must match the length of the selection'
+            x=np.array(x)
+            if x.ndim==1:x=np.atleast_2d(x).T
+            if norm:
+                x-=x.min()
+                x/=x.max()
+            ids=np.array([s.indices for s in self.repr_sel],dtype=object)
+            out=dict(R=x,rho_index=np.arange(x.shape[1]),ids=ids)
+            
+            CMXRemote.add_event(ID,'Detectors',out)
+
+    @property
+    def _hash(self):
+        #TODO remove this someday
+        return hash(self)
+
+    def __hash__(self):
+        x = 0
+        fields = ["sel1", "sel2"]
+        for field in fields:
+            if hasattr(self, field) and getattr(self, field) is not None:
+                f = getattr(self, field)
+                if hasattr(f,"ids"):
+                    x += hash(f) #<atomgroup hashing
+                elif hasattr(f, "__iter__"):
+                    for i,y in enumerate(f):
+                        x += hash(y)*(i+1)
+        return x + self.molsys._hash
         
         
