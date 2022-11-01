@@ -448,7 +448,7 @@ class iRED():
             out.R=self.DelCt[self.M.shape[0]-self.mat_rank:]
             out.Rstd=np.repeat(np.array([out.sens.info['stdev']],dtype=dtype),self.mat_rank,axis=0)
         else:
-            out.R=self.DelCt
+            out.R=np.array(self.DelCt,dtype=dtype)
             out.Rstd=np.repeat(np.array([out.sens.info['stdev']],dtype=dtype),self.M.shape[0],axis=0)
         out.iRED={'M':self.M,'m':self.m,'Lambda':self.Lambda,'rank':self.rank,'mat_rank':self.mat_rank}
         if self.project is not None:
@@ -584,6 +584,7 @@ class Data_iRED(Data):
         assert 'Lambda' in self.iRED.keys(),'This iRED data object has already been converted to bonds'
         
         out=self.__class__(sens=self.sens,src_data=self)
+        out.details.extend(self.details)
         out.details.append('Converted from iRED modes to iRED bond data')
         out.source.Type=self.source.Type.replace('mode','bond') #Mode analysis converted to bond analysis
         out.source.n_det=self.source.n_det
@@ -630,7 +631,7 @@ class Data_iRED(Data):
             
         return out
     
-    def plot_CC(self,rho_index:int=None,norm:bool=True,abs_val:bool=True,color=None,ax:plt.Axes=None,**kwargs) -> plt.Axes:
+    def plot_CC(self,rho_index:int=None,index=None,norm:bool=True,abs_val:bool=True,color=None,ax:plt.Axes=None,**kwargs) -> plt.Axes:
         """
         Plots the cross-correlation between bonds for iRED cross correlation
         data. Only applies to iRED data converted to bonds
@@ -667,16 +668,16 @@ class Data_iRED(Data):
         if hasattr(rho_index,'lower') and rho_index.lower()=='all':
             ax,*_=subplot_setup(self.CCnorm.shape[0])
             for k,a in enumerate(ax):
-                self.plot_CC(rho_index=k,norm=norm,abs_val=abs_val,color=color,ax=a,**kwargs)
+                self.plot_CC(rho_index=k,index=index,norm=norm,abs_val=abs_val,color=color,ax=a,**kwargs)
             for a in ax[1:]:
                 a.sharex(ax[0])
                 a.sharey(ax[0])
             ax[0].figure.tight_layout()
-            def empty_formatter(a,b):
-                return ''
-            for a in ax:
-                if not(a.is_first_row()):a.xaxis.set_major_formatter(empty_formatter)
-                if not(a.is_last_col()):a.yaxis.set_major_formatter(empty_formatter)
+            # def empty_formatter(a,b):
+            #     return ''
+            # for a in ax:
+            #     if not(a.is_first_row()):a.xaxis.set_major_formatter(empty_formatter)
+            #     if not(a.is_last_col()):a.yaxis.set_major_formatter(empty_formatter)
                     
                     
             return ax
@@ -689,6 +690,12 @@ class Data_iRED(Data):
             CC=self.totalCCnorm-np.eye(self.totalCC.shape[0]) if norm else self.totalCC
         else:
             CC=self.CCnorm[rho_index]-np.eye(self.totalCC.shape[0]) if norm else self.CC[rho_index]
+        
+        if index is None:index=np.arange(CC.shape[0])
+        CC=CC[index][:,index]
+        
+        
+    
         
         if abs_val:
             # CC/=CC.max()
@@ -712,10 +719,11 @@ class Data_iRED(Data):
             im=np.array(im).T
             ax.imshow(im)
         
+        label=self.label[index]
         def format_func(value,tick_number):
-            if value>=self.label.shape[0]:value=self.label.shape[0]-1
+            if value>=label.shape[0]:value=label.shape[0]-1
             if value<0:value=0
-            return str(self.label[int(value)])
+            return str(label[int(value)])
         
         ax.xaxis.set_major_formatter(plt.FuncFormatter(format_func))
         ax.yaxis.set_major_formatter(plt.FuncFormatter(format_func))
@@ -726,7 +734,7 @@ class Data_iRED(Data):
                 
         return ax
         
-    def CCchimera(self,index=None,rho_index:int=None,scaling:float=None,norm=True) -> None:
+    def CCchimera(self,index=None,rho_index:int=None,indexCC:int=None,scaling:float=None,norm:bool=True) -> None:
         """
         Plots the cross correlation of motion for a given detector window in 
         chimera. 
@@ -736,12 +744,19 @@ class Data_iRED(Data):
         index : list-like, optional
             Select which residues to plot. The default is None.
         rho_index : int, optional
-            Select which detector to initiall show. The default is None.
-            NOT IMPLEMENTED
+            Select which detector to initially show. The default is None.
+        indexCC : int,optional
+            Select which row of the CC matrix to show. Must be used in combination
+            with rho_index. Note that if index is also used, indexCC is applied
+            AFTER index.
         scaling : float, optional
             Scale the display size of the detectors. If not provided, a scaling
             will be automatically selected based on the size of the detectors.
             The default is None.
+        norm : bool, optional
+            Normalizes the data to the amplitude of the corresponding detector
+            responses (makes diagonal of CC matrix equal to 1).
+            The default is True
 
         Returns
         -------
@@ -760,8 +775,7 @@ class Data_iRED(Data):
         #TODO add some options for including the sign of the correlation (??)
         R=np.abs(getattr(self,'CCnorm' if norm else 'CC')[:,index][:,:,index].T)
         R *= 1/R.T[rho_index].max() if scaling is None else scaling
-        
-        R[R < 0] = 0
+        # R[R < 0] = 0 
 
         if self.source.project is not None:
             ID=self.source.project.chimera.CMXid
@@ -771,6 +785,7 @@ class Data_iRED(Data):
                 print(ID)
         else: #Hmm....how should this work?
             ID=CMXRemote.launch()
+            cmds=[]
 
 
         ids=np.array([s.indices for s in self.select.repr_sel[index]],dtype=object)
@@ -778,25 +793,36 @@ class Data_iRED(Data):
 
 
         # CMXRemote.send_command(ID,'close')
-        CMXRemote.send_command(ID,'open "{0}"  maxModels 1'.format(self.select.molsys.topo))
-        mn=CMXRemote.valid_models(ID)[-1]
-        CMXRemote.command_line(ID,'sel #{0}'.format(mn))
 
 
-        CMXRemote.send_command(ID,'set bgColor gray')
-        CMXRemote.send_command(ID,'style sel ball')
-        CMXRemote.send_command(ID,'size sel stickRadius 0.2')
-        CMXRemote.send_command(ID,'size sel atomRadius 0.8')
-        CMXRemote.send_command(ID,'~ribbon')
-        CMXRemote.send_command(ID,'show sel')
-        CMXRemote.send_command(ID,'color sel tan')
-        CMXRemote.send_command(ID,'~sel')
-
-
-        out=dict(R=R,rho_index=rho_index,ids=ids)
-        # CMXRemote.remove_event(ID,'Detectors')
-        CMXRemote.add_event(ID,'DetCC',out)
         
+        if len(rho_index)==1 and indexCC is not None:
+            x=R[indexCC][:,rho_index].squeeze()
+            self.select.chimera(color=plt.get_cmap('tab10')(rho_index[0]),x=x,index=index)
+            sel0=self.select.repr_sel[index][indexCC]
+            mn=CMXRemote.valid_models(ID)[-1]
+            CMXRemote.send_command(ID,'color '+'|'.join(['#{0}/{1}:{2}@{3}'.format(mn,s.segid,s.resid,s.name) for s in sel0])+' black')
+            return sel0
+        else:
+            CMXRemote.send_command(ID,'open "{0}"  maxModels 1'.format(self.select.molsys.topo))
+            mn=CMXRemote.valid_models(ID)[-1]
+            CMXRemote.command_line(ID,'sel #{0}'.format(mn))
+
+
+            CMXRemote.send_command(ID,'set bgColor gray')
+            CMXRemote.send_command(ID,'style sel ball')
+            CMXRemote.send_command(ID,'size sel stickRadius 0.2')
+            CMXRemote.send_command(ID,'size sel atomRadius 0.8')
+            CMXRemote.send_command(ID,'~ribbon')
+            CMXRemote.send_command(ID,'show sel')
+            CMXRemote.send_command(ID,'color sel tan')
+            CMXRemote.send_command(ID,'~sel')
+            
+            out=dict(R=R,rho_index=rho_index,ids=ids)
+            CMXRemote.add_event(ID,'DetCC',out)
+        
+            if self.source.project is not None:
+                self.source.project.chimera.command_line(self.source.project.chimera.saved_commands)
         
                 
         

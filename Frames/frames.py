@@ -379,7 +379,7 @@ def side_chain_chi(molecule,n_bonds=1,Nuc=None,resids=None,segids=None,filter_st
     def sub():
         box=molecule.box
         vZ=sel1.positions-sel2.positions
-        vXZ=sel3.positions-sel2.positions
+        vXZ=sel2.positions-sel3.positions
         vZ=vft.pbc_corr(vZ.T,box)
         vXZ=vft.pbc_corr(vXZ.T,box)
         return vZ,vXZ
@@ -707,4 +707,68 @@ def MOIbeta(molecule,sel,sel1=None,sel2=None,Nuc=None,index=None,resids=None,seg
     
     return sub
 
+
+def aromatic_plane(molecule,resids=None,segids=None,filter_str:str=None,sigma:float=0)->tuple:
+    """
+    Frame which returns a vector perpendicular to the plane of an aromatic amino
+    acid (F,H,W,Y) and a second vector pointing from the center of ring to the
+    CB.
+
+    Parameters
+    ----------
+    molecule : TYPE
+        Selection object.
+    resids : TYPE, optional
+        List of residues for which we should return aromatic planes. 
+        The default is None.
+    segids : TYPE, optional
+        List of segments for which we should return aromatic planes.
+        The default is None.
+    filter_str : str, optional
+        string which filters the selection using MDAnalysis format. 
+        The default is None.
+    sigma : float, optional
+        Parameter to determine Gaussian moving average in post processing. 
+        The default is 0 (no post processing).
+
+    Returns
+    -------
+    tuple
+        Frame function, frame_index (np.array), dict (Post Processing info)
+
+    """
+    
+    
+    sel0=selt.aromatic_plane(molecule,resids=resids,segids=segids,filter_str=filter_str)
+    
+    sel=list()
+    selCB=list()
+    for k,s in enumerate(sel0):
+        if len(s):
+            sel.append(s)
+            selCB.append(s[s.names=='CB'])
+            
+    #Make a frame index
+    if molecule.sel1 is not None:
+        mdmode=molecule._mdmode
+        molecule._mdmode=True
+        frame_index=np.ones(len(molecule.sel1))*np.nan
+        sel1=molecule.sel1
+        for k,s in enumerate(sel):
+            frame_index[np.logical_and(s.resids[0]==sel1.resids,s.segids[0]==sel1.segids)]=k
+        molecule._mdmode=mdmode
+    else:
+        frame_index=np.repeat(np.arange(len(sel0)),2) #Just a best guess if no other information available
+        
+        
+    
+    def sub():
+        vZ=np.zeros([len(sel),3])
+        vXZ=np.zeros([len(sel),3])
+        for k,(s,sCB) in enumerate(zip(sel,selCB)):
+            vZ[k]=vft.RMSplane(s.positions.T)
+            vXZ[k]=(s-sCB).positions.mean(0)-sCB.positions
+        return vZ.T,vXZ.T
+    
+    return sub,frame_index,{'PPfun':'AvgGauss','sigma':sigma}
 

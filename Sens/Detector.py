@@ -5,18 +5,24 @@ Created on Sat Nov 13 15:32:58 2021
 
 @author: albertsmith
 """
-import warnings
 
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import ticker
 from pyDR.misc.disp_tools import set_plot_attr,NiceStr
+from pyDR.misc import ProgressBar
 from pyDR import Sens
 from scipy.sparse.linalg import eigs
 from scipy.optimize import lsq_linear as lsqlin
 from scipy.optimize import linprog
 from pyDR.misc.tools import linear_ex
 from copy import copy
+
+import warnings
+from scipy.linalg import LinAlgWarning
+from scipy.optimize import OptimizeWarning
+warnings.filterwarnings(action='ignore', category=LinAlgWarning)
+warnings.filterwarnings(action='ignore', category=OptimizeWarning)
 
 class Detector(Sens.Sens):
     def __init__(self,sens):
@@ -163,8 +169,12 @@ class Detector(Sens.Sens):
         self.info.new_parameter(z0=np.array([(self.z*rz).sum()/rz.sum() for rz in self.rhoz]))
         self.info.new_parameter(zmax=np.array([self.z[np.argmax(rz)] for rz in self.rhoz]))
         self.info.new_parameter(Del_z=np.array([rz.sum()*dz/rz.max() for rz in self.rhoz]))
-        self.info.new_parameter(stdev=((np.linalg.pinv(self.__r)**2)@self.sens.info['stdev']**2)**0.5)
-    
+        # self.info.new_parameter(stdev=((np.linalg.pinv(self.__r)**2)@self.sens.info['stdev']**2)**0.5)
+        if not(np.any(self.sens.info['stdev']==0)):
+            self.info.new_parameter(stdev=((np.linalg.pinv((self.__r.T/self.sens.info['stdev'].astype(float)).T)**2).sum(1))**0.5)
+        else:
+            self.info.new_parameter(stdev=np.zeros(self.rhoz.shape[0]))
+        
     #%% Detector optimization
     def _rho(self):
         """
@@ -234,6 +244,8 @@ class Detector(Sens.Sens):
         if NegAllow:self.allowNeg()
         
         if Normalization:self.ApplyNorm(Normalization)
+        
+        return self
     
     def r_no_opt(self,n):
         """
@@ -246,6 +258,8 @@ class Detector(Sens.Sens):
         self.T=np.eye(n) #No optimization
         self.opt_pars={'n':n,'Type':'no_opt','Normalization':None,'NegAllow':False,'options':[]}
         self.update_det() ##Re-calculate detectors based on the new T matrix
+        
+        return self
         
     
     def r_target(self,target,n=None,Normalization=None):
@@ -281,6 +295,8 @@ class Detector(Sens.Sens):
         self.opt_pars={'n':n,'Type':'target','Normalization':None,'NegAllow':False,'options':[]}
         self.update_det()    #Re-calculate detectors based on the new T matrix
         if Normalization:self.ApplyNorm(Normalization)
+        
+        return self
     
     def r_auto(self,n,Normalization='MP',NegAllow=False, mode=None):
         """
@@ -314,6 +330,7 @@ class Detector(Sens.Sens):
             return x
         """
         
+        
         def true_range(k,untried):
             "Find the range around k in untried where all values are True"
             i=np.nonzero(np.logical_not(untried[k:]))[0]
@@ -344,8 +361,10 @@ class Detector(Sens.Sens):
                 rhoz0=(self.SVD.Vt.T@x).T
                 maxi=np.argmax(np.abs(rhoz0))
                 error[k]=np.abs(k-maxi)
-                if k<=maxi:untried[k:maxi+1]=False  #Update the untried index
-                else:untried[maxi:k+1]=False
+                if k<=maxi:
+                    untried[k:maxi+1]=False  #Update the untried index
+                else:
+                    untried[maxi:k+1]=False
                 test=maxi
             
             if (k<=left or k>=right-1) and not(endpoints):
@@ -371,6 +390,22 @@ class Detector(Sens.Sens):
                     break
             return biggest
         
+        def sweep(error):
+            print('Standard optimization failed: ')
+            rhoz=list()
+            X=list()
+            for k in range(len(self.z)):
+                ProgressBar(k+1,ntc,'Optimizing:','',0,40)
+                x=self.opt_z(n=n,index=k)
+                rhoz0=(self.SVD.Vt.T@x).T
+                maxi=np.argmax(np.abs(rhoz0))
+                error[k]=np.abs(k-maxi)
+                X.append(x)
+                rhoz.append(rhoz0)
+            
+            index=np.argsort(error)[:n]
+            return index,[X[i] for i in index]
+            
         #Locate where the Vt are sufficiently large for maxima
         i0=np.nonzero(np.any(np.abs(Vt.T)>(np.abs(Vt).max(1)*.75),1))[0]
         ntc=self.z.size
@@ -383,36 +418,38 @@ class Detector(Sens.Sens):
         X=list()        #Columns of the T-matrix
         err=np.ones(ntc,dtype=int)*ntc #Keep track of error at all time points tried
             
-        "Locate the left-most detector"
-        if untried[0]:
-            rhoz0,x,k=find_nearest(Vt,0,untried,error=err,endpoints=True)
-            rhoz.append(rhoz0)
-            X.append(x)
-            index.append(k)
-            count+=1
-        "Locate the right-most detector"
-        if untried[-1] and n>1:
-            rhoz0,x,k=find_nearest(Vt,ntc-1,untried,error=err,endpoints=True)
-            rhoz.append(rhoz0)
-            X.append(x)
-            index.append(k)
-            count+=1
-        "Locate remaining detectors"
-        while count<n:  
-            "Look in the middle of the first untried range"
-            k=biggest_gap(untried)
-            out=find_nearest(Vt,k,untried,error=err)  #Try to find detectors
-            if out: #Store if succesful
-                rhoz.append(out[0])
-                X.append(out[1])
-                index.append(out[2])
-#                untried[out[2]-1:out[2]+2]=False #No neighboring detectors
+        try:
+            "Locate the left-most detector"
+            if untried[0]:
+                rhoz0,x,k=find_nearest(Vt,0,untried,error=err,endpoints=True)
+                rhoz.append(rhoz0)
+                X.append(x)
+                index.append(k)
                 count+=1
-        
+            "Locate the right-most detector"
+            if untried[-1] and n>1:
+                rhoz0,x,k=find_nearest(Vt,ntc-1,untried,error=err,endpoints=True)
+                rhoz.append(rhoz0)
+                X.append(x)
+                index.append(k)
+                count+=1
+            "Locate remaining detectors"
+            while count<n:  
+                "Look in the middle of the first untried range"
+                k=biggest_gap(untried)
+                out=find_nearest(Vt,k,untried,error=err)  #Try to find detectors
+                if out: #Store if succesful
+                    rhoz.append(out[0])
+                    X.append(out[1])
+                    index.append(out[2])
+    #                untried[out[2]-1:out[2]+2]=False #No neighboring detectors
+                    count+=1
+        except:
+            index,X=sweep(err)
         
         i=np.argsort(index).astype(int)
 #        pks=np.array(index)[i]
-        rhoz=np.array(rhoz)[i]
+        # rhoz=np.array(rhoz)[i]
         self.T=np.array(X)[i]    
         self.opt_pars={'n':n,'Type':'auto','Normalization':None,'NegAllow':False,'options':[]}
         self.update_det()
@@ -420,6 +457,8 @@ class Detector(Sens.Sens):
 
         if NegAllow:self.allowNeg()
         if Normalization:self.ApplyNorm(Normalization)
+        
+        return self
         
     def allowNeg(self):
         """
@@ -458,21 +497,22 @@ class Detector(Sens.Sens):
 
         assert 'n' in self.opt_pars.keys(),'First perform initial detector optimization before including S2'
         
-        if 'inclS2' in self.opt_pars['options']:self.removeS2
-        if 'inclS2' in self.opt_pars['options']:return #Function already run
+        if 'inclS2' in self.opt_pars['options']:self.removeS2()
+        # if 'inclS2' in self.opt_pars['options']:return #Function already run
         self.opt_pars['options'].append('inclS2')
         
         norm=Normalization if Normalization is not None else self.opt_pars['Normalization']
-        if norm.lower()!=self.opt_pars['Normalization'].lower():
-            self.ApplyNorm(norm)
-            self.opt_pars['Normalization']=norm.upper()
+        if norm is None:norm='MP'
+        # if norm is not None:
+        #     self.ApplyNorm(norm)
+        #     self.opt_pars['Normalization']=norm.upper()
 
         if norm.lower()=='mp' or norm.lower()=='i':
             wt=linprog(-(self.rhoz.sum(axis=1)).T,self.rhoz.T,np.ones(self.rhoz.shape[1]),\
                         bounds=(-500,500),method='interior-point',options={'disp' :False,})['x']
             rhoz0=[1-(self.rhoz.T@wt).T]
             rhoz0CSA=[1-(self._rhozCSA.T@wt).T]
-            sc=np.atleast_1d(rhoz0[0].max()) if norm.lower()=='mp' else rhoz0[0].sum()*(self.z[1]-self.z[0])
+            sc=np.atleast_1d(rhoz0[0].max() if norm.lower()=='mp' else rhoz0[0].sum()*(self.z[1]-self.z[0]))
             self._Sens__rho=np.concatenate((rhoz0/sc,self.rhoz))
             self._Sens__rhoCSA=np.concatenate((rhoz0CSA/sc,self._rhozCSA))
             mat1=np.concatenate((np.zeros([self.__r.shape[0],1]),self.__r),axis=1)
@@ -483,7 +523,7 @@ class Detector(Sens.Sens):
                          np.concatenate((np.zeros([self.__r.shape[0],1]),self.__r),axis=1),\
                                np.ones([1,self.__r.shape[1]+1])),axis=0)
             self._Sens__rho=np.concatenate(([1-self._Sens__rho.sum(0)],self._Sens__rho),axis=0)
-            self._Sens__rhoCDA=np.concatenate(([1-self._Sens__rhoCSA.sum(0)],self._Sens__rhoCSA),axis=0)
+            self._Sens__rhoCSA=np.concatenate(([1-self._Sens__rhoCSA.sum(0)],self._Sens__rhoCSA),axis=0)
         else:
             assert 0,"Unknown normalization (use 'M','MP', or 'I')"
             
@@ -493,6 +533,8 @@ class Detector(Sens.Sens):
         ne=len(self.info)
         self.info._Info__values=self.info._Info__values.T[np.concatenate(([-1],np.arange(ne-1)))].T
     
+        return self
+    
     def removeS2(self):
         if self._islocked:return
         
@@ -500,8 +542,11 @@ class Detector(Sens.Sens):
             print('S2 not included')
             return
         self._Sens__rho=self.rhoz[1:]
+        self._Sens__rhoCSA=self._Sens__rhoCSA[1:]
         self.__r=self.r[:-1,1:]
         self.opt_pars['options'].remove('inclS2')
+        
+        return self
     
     def R2ex(self):
         pass
@@ -675,7 +720,7 @@ class SVD():
                 self._U=((X@V)@np.diag(1/self.S)).real
                 self._Vt=V.real.T
             else:
-                self._U,self._S,self._Vt=[x.real for x in np.linalg.svd(X)] #Full calculation
+                self._U,self._S,self._Vt=np.linalg.svd(X) #Full calculation
             
             self._VtCSA=np.diag(1/self._S)@(self._U.T@(self.sens._rho_effCSA[0].T*self.sens.norm).T)
             

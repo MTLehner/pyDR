@@ -23,7 +23,7 @@ class MolSys():
         """
         Generates a MolSys object, potentially with a trajectory attached, in
         case traj_files is specified. Note that if the topology provided does
-        not include positions (.psf, for exampe), then you must provide
+        not include positions (.psf, for example), then you must provide
         traj_files for viewing purposes.
 
         Parameters
@@ -65,9 +65,15 @@ class MolSys():
             self._traj=None
             return
         
+        self._orig_topo=topo
+        
+        i=self.uni.atoms.types==''
+        self.uni.atoms[i].types=[s.name[0] for s in self.uni.atoms[i]] #Fill in types where missing (ok??) 
         self._traj=Trajectory(self.uni.trajectory,t0=t0,tf=tf,step=step,dt=dt) \
             if hasattr(self.uni,'trajectory') else None
-                
+         
+        self.make_pdb()
+        
         self.project=project
     
     @property
@@ -84,7 +90,7 @@ class MolSys():
 
     @property
     def details(self):
-        out=['Topology: {}'.format(self.topo)]
+        out=['Topology: {}'.format(self._orig_topo)]
         out.extend(self.traj.details)
         return out
 
@@ -93,17 +99,25 @@ class MolSys():
     def _hash(self):
         return hash(self.topo)
 
-    @property
-    def select_atoms(self):
+    
+    def select_atoms(self,select_str:str):
         """
-        Quick link to the MDAnalysis universe select_atoms function. 
+        Runs the MDAnalysis universe select_atoms function.
+
+        Parameters
+        ----------
+        select_str : str
+            Selection string to be called on the mdanalyis universe select_atoms
+            function.
 
         Returns
         -------
-        function
-            MDAnalysis select_atoms called from the full universe.
+        AtomGroup
+            MDAnalysis atom group.
+
         """
-        return self.uni.atoms.select_atoms
+        
+        return self.uni.atoms.select_atoms(select_str)
     
     def select_filter(self,resids=None,segids=None,filter_str=None) -> AtomGroup:
         """
@@ -167,7 +181,53 @@ class MolSys():
         if self.project is not None and self.project.chimera.saved_commands is not None:
             for cmd in self.project.chimera.saved_commands:
                 CMXRemote.send_command(ID,cmd)
+                
+    def make_pdb(self,ti:int=None,replace:bool=True)->str:
+        """
+        Creates a pdb from the topology and trajectory files at the specified
+        time point (default ti=0). By default, the pdb will be used as the
+        topology file for this molsys object and will replace the existing 
+        topology (i.e. we'll reload the MDAnalysis universe)
+
+        Parameters
+        ----------
+        ti : int, optional
+            Determines which time point of the trajectory to use for the pdb. If
+            ti is not provided and the topology is already a pdb, then make_pdb
+            will exit, and return the current topology. If ti is not provided,
+            but the topology is not a pdb, then ti will be set to 0.
+            The default is None.
+        replace : bool, optional
+            Determines whether to replace the MDAnalysis universe. The default 
+            is True.
+
+        Returns
+        -------
+        str
+            Location of the new pdb. Located in same folder as original topology,
+            unless write access is restricted. Then writes to current directory
+                                     
+        """
     
+        
+        if self.topo.rsplit('.')[-1]=='pdb' and ti is None:return self.topo #Already a pdb
+        if ti is None:ti=0
+        
+        if self.traj is not None and len(self.traj):self.traj[ti]
+        
+        folder=os.path.split(self.topo)[0]
+        
+        filename='timestep{0}.pdb'.format(self.traj.mda_traj.ts.frame)
+        filename=os.path.join(folder,filename) if os.access(folder, os.W_OK) else os.path.abspath(filename)
+        self.uni.atoms.write(filename)
+        
+        if replace:
+            self._uni=Universe(filename)
+            self._uni.trajectory=self.traj.mda_traj
+            
+        return filename
+        
+        
         
 
 class Trajectory():
@@ -227,14 +287,14 @@ class Trajectory():
             
             def iterate():
                 for k in range(start,stop,step):
-                    if self.ProgressBar:ProgressBar((k+1-start)*step,stop-step,'Loading:','',0,40)
-                    yield self.mda_traj[k]
+                    if self.ProgressBar:ProgressBar((k+1-start),stop-start,'Loading:','',0,40)
+                    yield self[k]
             return iterate()
         elif hasattr(index,'__iter__'):
             def iterate():
                 for m,k in enumerate(index):
                     if self.ProgressBar and hasattr(index,'__len__'):ProgressBar(m+1,len(index),'Loading:','',0,40)
-                    yield self.mda_traj[k]
+                    yield self[k]
             return iterate()
         else:
             assert index<self.__len__(),"index must be less than the truncated trajectory length"
@@ -351,6 +411,7 @@ class MolSelect():
             self._mdmode=False
             name='_'+name
             if value is None:
+                self._mdmode=_mdmode
                 return
             elif isinstance(value,AtomGroup):
                 sel=np.zeros(len(value),dtype=object)
@@ -366,6 +427,12 @@ class MolSelect():
             return
         
         super().__setattr__(name,value)
+    
+    def clear_sel(self):
+        self._sel1=None
+        self._sel2=None
+        self._repr_sel=None
+        self._label=None
     
     @property
     def sel1(self):
@@ -386,7 +453,7 @@ class MolSelect():
             pyDR Project object
 
         """
-        return self._project if self._project else self.molsys.project
+        return self._project if self._project is not None else self.molsys.project
     
     def __copy__(self):
         cls = self.__class__
@@ -445,6 +512,8 @@ class MolSelect():
         else:
             self.sel1,self.sel2=selt.protein_defaults(Nuc=Nuc,mol=self,resids=resids,segids=segids,filter_str=filter_str)
         
+        _mdmode=self._mdmode
+        self._mdmode=False
         repr_sel=list()        
         if hasattr(Nuc,'lower') and Nuc.lower() in ['15n','n15','n','co','13co','co13']:
             for s in self.sel1:
@@ -455,11 +524,18 @@ class MolSelect():
         elif hasattr(Nuc,'lower') and Nuc.lower()[:3] in ['ivl','ch3'] and '1' in Nuc:
             for s in self.sel1:
                 repr_sel.append(s+s.residues[0].atoms.select_atoms('name H* and around 1.4 name {}'.format(s.name)))
+        elif hasattr(Nuc,'lower') and Nuc.lower()=='cacb':
+            for s in self.sel1:
+                repr_sel.append(s.residues[0].atoms.select_atoms('name N CA C CB'))
+        elif hasattr(Nuc,'lower') and Nuc.lower()=='sidechain':
+            for s in self.sel1:
+                repr_sel.append(s.residues[0].atoms.select_atoms('not name N O H HN C'))
         else:
             for s1,s2 in zip(self.sel1,self.sel2):
                 repr_sel.append(s1+s2)
         self.repr_sel=repr_sel
         self.set_label(label)
+        self._mdmode=_mdmode
 
     @property
     def repr_sel(self):
@@ -633,7 +709,7 @@ class MolSelect():
             self._mdmode=mdmode
         
     def copy(self):
-        return copy.copy(self)
+        return copy(self)
         
         
     def compare(self,sel,mode='auto'):
@@ -723,7 +799,7 @@ class MolSelect():
         in21=self.compare(sel,mode='auto')[1]
         return len(in21)==len(self) and np.all(in21==np.sort(in21))
 
-    def chimera(self,color:tuple=(1.,0.,0.,1.),x:np.array=None,norm:bool=False,repr_sel=False):
+    def chimera(self,color:tuple=(1.,0.,0.,1.),x=None,index=None,norm:bool=False):
         """
         Opens the molecule in chimera. One may either highlight the selection
         (optionally provide color) or one may plot some data onto the molecule,
@@ -737,6 +813,10 @@ class MolSelect():
             Parameter to encode onto the molecule. Length should match the length
             of the selection object. Typically, x is normalized to a maximum
             of 1, although this is not requred. The default is None.
+        index : list-like, optional
+            Select which elements of selection on which to plot data. Should
+            have the same length as x.
+            The default is None.
         norm : bool, optional
             Determine whether to renormalize x, such that it spans from 0 to 1.
 
@@ -769,25 +849,28 @@ class MolSelect():
         CMXRemote.send_command(ID,'color sel tan')
         CMXRemote.send_command(ID,'~sel')
         
+        if index is None:index=np.arange(len(self))
+        
+        if np.max(color)>1:color=[float(c/255) for c in color]
+        
         if self.project is not None and self.project.chimera.saved_commands is not None:
             for cmd in self.project.chimera.saved_commands:
                 CMXRemote.send_command(ID,cmd)
         
         if self.sel1 is not None:
-            ids=np.concatenate([s.indices for s in (self.repr_sel if repr_sel else [*self.sel1,*self.sel2])],dtype=int)
+            ids=np.concatenate([s.indices for s in self.repr_sel[index]],dtype=int)
         
         if x is None:
             CMXRemote.show_sel(ID,ids=ids,color=color)
         else:
-            assert len(x)==len(self),'Length of x must match the length of the selection'
+            assert len(x)==len(self.sel1[index]),'Length of x must match the length of the selection'
             x=np.array(x)
             if x.ndim==1:x=np.atleast_2d(x).T
             if norm:
                 x-=x.min()
                 x/=x.max()
-            ids=np.array([s.indices for s in self.repr_sel],dtype=object)
-            out=dict(R=x,rho_index=np.arange(x.shape[1]),ids=ids)
-            
+            ids=np.array([s.indices for s in self.repr_sel[index]],dtype=object)
+            out=dict(R=np.abs(x),rho_index=np.arange(x.shape[1]),ids=ids,color=[int(c*255) for c in color])
             CMXRemote.add_event(ID,'Detectors',out)
 
     @property

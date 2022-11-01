@@ -193,7 +193,51 @@ def sel_lists(mol,sel=None,resids=None,segids=None,filter_str=None):
     return sel
 
 #%% Specific selections for proteins
-def protein_defaults(Nuc,mol,resids=None,segids=None,filter_str=None):
+def protein_defaults(Nuc:str,mol,resids:list=None,segids:list=None,filter_str:str=None)->tuple:
+    """
+    Selects pre-defined pairs of atoms in a protein, where we use defaults based
+    on common pairs of nuclei used for relaxation. Additional filters may be
+    applied to obtain a more specific selection.
+
+
+    Multiple strings may return the same pair
+    
+    N,15N,N15       : Backbone N and the directly bonded hydrogen
+    C,CO,13CO,CO13  : Backbone carbonyl carbon and the carbonyl oxygen
+    CA,13CA,CA13    : Backbone CA and the directly bonded hydrogen (only HA1 for glycine) 
+    CACB            : Backbone CA and CB (not usually relaxation relevant)
+    IVL/IVLA/CH3    : Methyl groups in Isoleucine/Valine/Leucine, or also including
+                      Alanine, or simply all methyl groups. Each methyl group
+                      returns 3 pairs, corresponding to each hydrogen
+    IVL1/IVLA1/CH31 : Same as above, except only one pair
+    IVLl/IVLAl/CH3l : Same as above, but with only the 'left' leucine and valine
+                      methyl group
+    IVLr/IVLAr/CH3r : Same as above, but selects the 'right' methyl group
+    FY_d,FY_e,FY_z  : Phenylalanine and Tyrosine H–C pairs at either the delta,
+                      epsilon, or  zeta positions.
+    FY_d1,FY_e1,FY_z1:Same as above, but only one pair returned for each amino
+                      acid
+
+    Parameters
+    ----------
+    Nuc : str
+        Specifies the nuclear pair to select. Not case sensitive
+    mol : MolSelect object or AtomGroup
+    resids : list/array/single element, optional
+        Restrict selected residues. The default is None.
+    segids : list/array/single element, optional
+        Restrict selected segments. The default is None.
+    filter_str : str, optional
+        Restricts selection to atoms selected by the provided string. String
+        is applied to the MDAnalysis select_atoms function. The default is None.
+        
+    Returns
+    -------
+    sel1 : atomgroup
+    sel2 : atomgroup
+
+    """
+    
     """
     Selects pre-defined pairs of atoms in a protein, usually based on nuclei that
     are observed for relaxation. One may also select specific residues, specific
@@ -220,6 +264,31 @@ def protein_defaults(Nuc,mol,resids=None,segids=None,filter_str=None):
     elif Nuc.lower()=='cacb':
         sel1=sel0.select_atoms('name CA and around 1.7 name CB')
         sel2=sel0.select_atoms('name CB and around 1.7 name CA')
+    elif Nuc.lower()=='sidechain':
+        sel1=sel0.select_atoms('resname GLY ALA and name HA1 CB')+\
+            sel0.select_atoms('resname PHE TYR and name CZ')+\
+            sel0.select_atoms('resname HSD HIS and name NE2')+\
+            sel0.select_atoms('resname TRP and name CZ2')+\
+            sel0.select_atoms('resname CYS and name SG')+\
+            sel0.select_atoms('resname PRO ILE LEU and name CD CD1')+\
+            sel0.select_atoms('resname MET GLN and name CE NE2')+\
+            sel0.select_atoms('resname GLU and name OE1')+\
+            sel0.select_atoms('resname SER SERO and name OG')+\
+            sel0.select_atoms('resname ASN THR and name ND ND2')+\
+            sel0.select_atoms('resname ARG and name NH1')+\
+            sel0.select_atoms('resname LYS and name NZ')+\
+            sel0.select_atoms('resname ASP and name OD1')+\
+            sel0.select_atoms('resname VAL and name CG1')+\
+            sel0.select_atoms('resname THR and name CG2')
+            
+        sel1=sel1[np.argsort(sel1.resids)]
+        sel2=sel0.select_atoms('resname GLY ALA and name CA')+sel0.select_atoms('not resname GLY ALA and name CB')
+        sel2=sel2[np.argsort(sel2.resids)]
+        
+        i=np.isin(sel2.resids,sel1.resids)
+        sel2=sel2[i]
+        i=np.isin(sel1.resids,sel2.resids)
+        sel1=sel1[i]
     elif Nuc[:3].lower()=='ivl' or Nuc[:3].lower()=='ch3':
         if Nuc[:4].lower()=='ivla':
             fs0='resname ILE Ile ile VAL val Val LEU Leu leu ALA Ala ala'
@@ -241,6 +310,14 @@ def protein_defaults(Nuc,mol,resids=None,segids=None,filter_str=None):
         if '1' in Nuc:
             sel1=sel1[::3]
             sel2=sel2[::3]
+    elif Nuc[:3].lower()=='fy_':
+        sel1=sel0.select_atoms('name C{0}* and resname TYR PHE'.format(Nuc[-1].upper()))
+        sel2=sel0.select_atoms('name H{0}* and resname TYR PHE'.format(Nuc[-1].upper()))
+        if Nuc[:4].lower()!='fy_z' and '1' in Nuc.lower():
+            sel1,sel2=sel1[::2],sel2[::2]
+    else:
+        print('Unrecognized Nuc option')
+        return
           
     return sel1,sel2
 
@@ -262,7 +339,6 @@ def find_methyl(mol,resids=None,segids=None,filter_str=None,select=None):
            for b in np.array(find_bonded(selC0,selH0,n=3,d=1.5,sort='massi')).T])
 #    index=np.all([b.names[0]=='H' for b in find_bonded(selC0,selH0,n=3,d=1.5)],axis=0)
     selH=find_bonded(selC0[index],sel0=selH0,n=3,d=1.5)
-
     selH=np.array(selH).T
     selC=selC0[index]
     
@@ -308,7 +384,7 @@ def find_methyl(mol,resids=None,segids=None,filter_str=None,select=None):
     
     
 
-def find_bonded(sel,sel0=None,exclude=None,n=3,sort='dist',d=1.65):
+def find_bonded(sel,sel0=None,exclude=None,n=4,sort='dist',d=1.65):
     """
     Finds bonded atoms for each input atom in a given selection. Search is based
     on distance. Default is to define every atom under 1.65 A as bonded. It is 
@@ -359,8 +435,10 @@ def find_bonded(sel,sel0=None,exclude=None,n=3,sort='dist',d=1.65):
             if len(sel01)>k:
                 out[k]+=sel01[k]
             else:
-                out[k]+=s
-                
+                #Append self if we don't find enough bound atoms
+                out[k]+=s #Why do we do this? Here we add the original selection where no bonds are found....very strange, I think.
+                #Apparently, this breaks find_methyl without the above line.
+                # pass           
     return out        
         
     
@@ -438,6 +516,40 @@ def peptide_plane(mol,resids=None,segids=None,filter_str=None,full=True):
         return selN,selCm1,selOm1
     
 
+def aromatic_plane(mol,resids=None,segids=None,filter_str:str=None)->list:
+    """
+    Selects atoms in the peptide plane (CB and other heteroatoms) for the 
+    specified resids, segids, and filter_str. Note that if residues are requested
+    that are not aromatic, then empty atom groups will be returned for those
+    residues. If residues is not specified, then all resids will be used.
+
+    Parameters
+    ----------
+    mol : MolSelect
+        Selection object.
+    resids : TYPE, optional
+        List of residues for which we should return aromatic planes. 
+        The default is None.
+    segids : TYPE, optional
+        List of segments for which we should return aromatic planes.
+        The default is None.
+    filter_str : str, optional
+        string which filters the selection using MDAnalysis format. 
+        The default is None.
+
+    Returns
+    -------
+    list
+        list of atom groups for each aromatic plane
+    """
+    
+    sel0=sel0_filter(mol,resids,segids,filter_str)
+    return [r.atoms.select_atoms('resname TYR H* PHE TRP and not name N CA O C and not type H') for r in sel0.residues]
+        
+    
+    
+    
+
 def get_chain(atom,sel0,exclude=None):
     if exclude is None:exclude=[]
     '''searching a path from a methyl group of a residue down to the C-alpha of the residue
@@ -453,35 +565,35 @@ def get_chain(atom,sel0,exclude=None):
     a_name=atom.name.lower()
     a_type=atom.name[0].lower()
     if 'c'==a_name and len(exclude):
-      return [atom]
+        return [atom]
     elif a_name == "n":
-      return []
+        return []
     connected_atoms = []
     bonded = get_bonded()
     if len(exclude)==0:
-      if np.sum(np.fromiter(["h"==a.type.lower() for a in bonded],dtype=bool)) == 3:
-        final=True  
-        for a in bonded:
-          if "h"==a.name[0].lower():
-            connected_atoms.append(a)
-        if not "c"==a_type:
-          return []
-      else:
-        return []
+        if np.sum(np.fromiter(["h"==a.type.lower() for a in bonded],dtype=bool)) == 3:
+            final=True  
+            for a in bonded:
+                if "h"==a.name[0].lower():
+                  connected_atoms.append(a)
+            if not "c"==a_type:
+                return []
+        else:
+            return []
     connected_atoms.append(atom)
     exclude.append(atom)
     for a in bonded:
-      if not a in exclude:
-        nxt = get_chain(a,sel0,exclude)
-        for b in nxt:
-           connected_atoms.append(b)
+        if not a in exclude:
+            nxt = get_chain(a,sel0,exclude)
+            for b in nxt:
+               connected_atoms.append(b)
     if len(connected_atoms)>1:
-      if final:
-          return np.sum(connected_atoms)
-      else:
-          return connected_atoms
+        if final:
+            return np.sum(connected_atoms)
+        else:
+            return connected_atoms
     else:
-      return []
+        return []
 
 def search_methyl_groups(residue):
     methyl_groups = []

@@ -94,11 +94,15 @@ def avg2sel(data:Data,sel:MolSelect) -> Data:
             if np.any(i):
                 count+=1
                 if sel1 is None:
-                    sel1=s01
-                    sel2=s02
+                    # sel1=(s01+s01)[:1] #Trick to ensure we get atom groups
+                    # sel2=(s02+s02)[:1]
+                    sel1=(sel0.sel1[i]+sel0.sel1[i])[:1]
+                    sel2=(sel0.sel2[i]+sel0.sel2[i])[:1]
                 else:
-                    sel1+=s01
-                    sel2+=s02
+                    # sel1+=s01
+                    # sel2+=s02
+                    sel1+=sel0.sel1[i]
+                    sel2+=sel0.sel2[i]
                 for f in flds:
                     if hasattr(data,f) and getattr(data,f) is not None:
                         getattr(out,f)[k]+=getattr(data,f)[i][0]
@@ -164,8 +168,8 @@ def avgData(data:Data,index:list,wt:list=None)->Data:
     """
     
     if str(data.__class__)==str(clsDict['Project']):
-        for d in data:avgData(d,index=index,wt=wt)
-        return
+        return [avgData(d,index=index,wt=wt) for d in data]
+        
     
     out=clsDict['Data'](sens=data.sens) #Create output data with sensitivity as input detectors
     out.detect=data.detect
@@ -233,6 +237,9 @@ def avgData(data:Data,index:list,wt:list=None)->Data:
         out.select.sel1=sel1
         out.select.sel2=sel2
     
+    
+    if np.all([l[0]=='_' for l in out.label]):
+        out.label=np.array([l[1:] for l in out.label],dtype=out.label.dtype)
     
     out.details=data.details.copy()
     out.details.append('Data was averaged using an index')

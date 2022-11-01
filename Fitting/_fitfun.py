@@ -19,7 +19,7 @@ def fit0(X):
         pinv=PINV(X[0])   #Simple pinv fit if no bounds required
         rho=pinv@X[1]
         Rc=X[0]@rho
-        stdev=sqrt((pinv**2).sum())
+        stdev=sqrt((pinv**2).sum(1))
     else:
         Y=lsq(X[0],X[1],bounds=X[2])
         rho=Y['x']
