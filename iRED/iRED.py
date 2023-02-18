@@ -39,7 +39,7 @@ dtype=Defaults['dtype']
 
 class iRED():
     """
-    Object for managing iRED analysis of 
+    Object for managing iRED analysis of MD trajectories
     """
     def __init__(self,vec,rank=2,auto_exclude=True):
         self.rank=rank
@@ -443,13 +443,14 @@ class iRED():
         else:
             out.source.additional_info='rk{0}_'.format(self.rank)+out.source.additional_info
         
-        out.label=np.arange(self.M.shape[0])
+        
         if self.auto_exclude:
             out.R=self.DelCt[self.M.shape[0]-self.mat_rank:]
             out.Rstd=np.repeat(np.array([out.sens.info['stdev']],dtype=dtype),self.mat_rank,axis=0)
         else:
             out.R=np.array(self.DelCt,dtype=dtype)
             out.Rstd=np.repeat(np.array([out.sens.info['stdev']],dtype=dtype),self.M.shape[0],axis=0)
+        out.label=np.arange(out.R.shape[0])
         out.iRED={'M':self.M,'m':self.m,'Lambda':self.Lambda,'rank':self.rank,'mat_rank':self.mat_rank}
         if self.project is not None:
             self.project.append_data(out)
@@ -497,7 +498,7 @@ class Data_iRED(Data):
         # print('checkpoint')
         out=super().opt2dist(rhoz_cleanup=rhoz_cleanup,parallel=parallel)
         out.iRED=self.iRED
-        return 
+        return out
         
     
     @property
@@ -551,7 +552,7 @@ class Data_iRED(Data):
             print('Warning: Cross-correlation not calculated for this data object')
             return
         if self._totalCCnorm is None:
-            dg=np.sqrt(np.diag(self.totalCC))
+            dg=np.sqrt([np.diag(self.totalCC)])
             self._totalCCnorm=self.totalCC/(dg.T@dg)
         return self._totalCCnorm
     
@@ -676,8 +677,8 @@ class Data_iRED(Data):
             # def empty_formatter(a,b):
             #     return ''
             # for a in ax:
-            #     if not(a.is_first_row()):a.xaxis.set_major_formatter(empty_formatter)
-            #     if not(a.is_last_col()):a.yaxis.set_major_formatter(empty_formatter)
+            #     if not(a.get_subplotspec().is_first_row()):a.xaxis.set_major_formatter(empty_formatter)
+            #     if not(a.get_subplotspec().is_last_col()):a.yaxis.set_major_formatter(empty_formatter)
                     
                     
             return ax
@@ -730,7 +731,7 @@ class Data_iRED(Data):
         if rho_index is not None:
             ax.set_title(r'Cross-correlation for $\rho_{}$'.format(rho_index))
         else:
-            ax.set_title(r'Totall cross-correlation')
+            ax.set_title(r'Total cross-correlation')
                 
         return ax
         
@@ -801,11 +802,13 @@ class Data_iRED(Data):
             self.select.chimera(color=plt.get_cmap('tab10')(rho_index[0]),x=x,index=index)
             sel0=self.select.repr_sel[index][indexCC]
             mn=CMXRemote.valid_models(ID)[-1]
-            CMXRemote.send_command(ID,'color '+'|'.join(['#{0}/{1}:{2}@{3}'.format(mn,s.segid,s.resid,s.name) for s in sel0])+' black')
+            CMXRemote.send_command(ID,'color '+'|'.join(['#{0}/{1}:{2}@{3},'.format(mn,s.segid,s.resid,s.name) for s in sel0])+' black')
             return sel0
         else:
+            mn=CMXRemote.how_many_models(ID)+1
             CMXRemote.send_command(ID,'open "{0}"  maxModels 1'.format(self.select.molsys.topo))
-            mn=CMXRemote.valid_models(ID)[-1]
+            # mn=CMXRemote.valid_models(ID)[-1]
+            
             CMXRemote.command_line(ID,'sel #{0}'.format(mn))
 
 

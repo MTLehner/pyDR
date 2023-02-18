@@ -169,10 +169,10 @@ class DataMngr():
             else:
                 name=os.path.split(d.source.default_save_location)[1]
             if name in names:
-                name=name[:-5]+'1'+name[-5:]
-                k=2
+                name0=name[:-5]+'{}'+name[-5:]
+                k=1
                 while name in names:
-                    name=name[:-5]+'{}'.format(k)+name[-5:]
+                    name=name0.format(k)
                     k+=1
             names.append(name)
         names=[os.path.join(self.directory,name) for name in names]
@@ -216,17 +216,19 @@ class DataMngr():
             if not(self.saved[i]):
                 src_fname=None
                 if self[i].src_data is not None and not(isinstance(self[i].src_data,str)):
-                    k=np.argwhere([self[i].src_data==d for d in self.data_objs])[0,0]
+                    # k=np.argwhere([self[i].src_data==d for d in self.data_objs])[0,0]
+                    k=self.data_objs.index(self[i].src_data) if self[i].src_data in self.data_objs else None
                     
                     # if self[k].R.size<=ME:
                     #     self.save(k)
-                    if not(self[k].source.status=='raw' and str(self[k].sens.__class__).split('.')[-1][:-2]=='MD')\
-                        or include_rawMD:
-                        self.save(k)
-                    else:
-                        # print('Skipping source data of object {0} (project index {1}). Size of source data exceeds default max elements ({2})'.format(i,k,ME))
-                        print('Skipping source data of object "{0}".\n Set include_rawMD to True to include raw MD data'.format(self[i].title))
-                    src_fname=self.save_name[k]
+                    if k is not None:
+                        if not(self[k].source.status=='raw' and str(self[k].sens.__class__).split('.')[-1][:-2]=='MD')\
+                            or include_rawMD:
+                            self.save(k)
+                        else:
+                            # print('Skipping source data of object {0} (project index {1}). Size of source data exceeds default max elements ({2})'.format(i,k,ME))
+                            print('Skipping source data of object "{0}".\n Set include_rawMD to True to include raw MD data'.format(self[i].title))
+                        src_fname=None if k is None else self.save_name[k]
                 self[i].save(self.save_name[i],overwrite=True,save_src=False,src_fname=src_fname)
                 self[i].source.saved_filename=self.save_name[i]
                 self._hashes[i]=self[i]._hash #Update the hash so we know this state of the data is saved
@@ -620,15 +622,22 @@ class Chimera():
         """
         CMXid=self._CMXid[ID] if ID is not None else self.CMXid
         assert CMXid is not None,"No active sessions, save not completed"
-        
-        if not(os.path.exists(os.path.join(self.project.directory,'figures'))):
-            os.mkdir(os.path.join(self.project.directory,'figures'))
-        
-        filename=os.path.join(os.path.join(self.project.directory,'figures'),filename)
+
+        if self.project is not None:        
+            if not(os.path.exists(os.path.join(self.project.directory,'figures'))):
+                os.mkdir(os.path.join(self.project.directory,'figures'))
+            
+    
+            filename=os.path.join(os.path.join(self.project.directory,'figures'),filename)
         if len(filename.split('.'))<2:filename+='.png'
         
         
         self.command_line('save "{0}" {1}'.format(filename,options))
+        
+    def draw_tensors(self,A,pos=None,colors=((1,.39,.39,1),(.39,.39,1,1)),Aiso=None,comp='Azz'):
+        if self.current is None:self.current=0
+        self.CMX.run_function(self.CMXid,'draw_tensors',A,Aiso,pos,colors,comp)
+
 
 #%% Numpy nice display
 
@@ -735,7 +744,7 @@ class Project():
         """
         if len(self)==1 and hasattr(self[0],name):
             return getattr(self[0],name)
-        return super(object).__getattr__(self,name)
+        raise AttributeError(f"'Proj' object has no attribute '{name}'")
         
     #%% Detector manager
     @property
@@ -761,6 +770,22 @@ class Project():
         """
         assert self.directory is not None,"clear_memory can only run if the project has a directory for saving"
         self.save(include_rawMD)
+        # self=Project(self.directory)
+        del_ind=list()
+        del_file=list()
+        for k,i in enumerate(self._index):
+            if self.info[k]['status']=='raw' \
+                and str(self.data[i].sens.__class__).split('.')[-1][:-2]=='MD' \
+                and self.data.filenames[i] is None: #Raw and loaded and MD data and not saved
+                del_ind.append(k)  #These get deleted during clear_memory
+        
+        self.remove_data(del_ind,delete=True)
+        
+        # for i in self._index:
+        #     if self.data.data_objs[i] is not None \
+        #         and not(os.path.exists(self.data[i].source._src_data)):
+        #             self.data[i].src_data=None
+        
         self.data=DataMngr(self)
         gc.collect() #Garbage collect (get rid of the old data object)
         
@@ -863,7 +888,10 @@ class Project():
         # assert not(self._subproject),"Data cannot be removed from subprojects"
         
         if not(hasattr(index,'__len__')):index=[index]
+        index=np.array(index,dtype=int)
+        assert np.all(index<len(self)),'index must be less than len(proj)'
         
+        index=np.mod(index,len(self))
         if self._subproject:
             i=[self.parent_index[i] for i in index]
             self._parent.remove_data(i,delete=delete)
@@ -872,7 +900,6 @@ class Project():
                 self._index=self._index[self._index!=i]
                 self._index[self._index>i]-=1
         else:
-            
             index=np.sort([self._index[i] for i in index])[::-1] #Convert to data index
             
             # proj=self[index]
@@ -887,9 +914,10 @@ class Project():
             #     return
             
             for i in index:
-                self.data.remove_data(index=i,delete=delete)
                 self._index=self._index[self._index!=i]
                 self._index[self._index>i]-=1
+                self.data.remove_data(index=i,delete=delete)
+
             if delete: #We need to save– otherwise the project file will be corrupted if the user doesn't do this
                 self.save()
 
@@ -1004,19 +1032,115 @@ class Project():
         return np.array([np.argwhere(i==self._parent._index)[0,0] for i in self._index],dtype=int)
         
         
-    def save(self,include_rawMD=False):
+    def save(self,include_rawMD:bool=False,include_pdbs:bool=True):
+        """
+        Saves the project. By default, raw MD correlation functions will not be
+        saved, and pdbs will be created and saved for each selection object in
+        the project (pdbs for data not in memory will not be saved!)
+
+        Parameters
+        ----------
+        include_rawMD : bool, optional
+            Determines whether or not to save raw MD data, i.e. the full 
+            correlation functions. The default is False.
+        include_pdbs : bool, optional
+            Determines whether or not to create a pdb for each selection object.
+            Creating a pdb will allow one to load the project on a computer
+            where the original structural data is not stored. 
+            The default is True.
+
+        Returns
+        -------
+        None.
+
+        """
         assert not(self._subproject),"Sub-projects cannot be saved"
         self.data.save(include_rawMD=include_rawMD)
         self.write_proj()
+        if include_pdbs:self.save_pdbs()
+        
+    def save_pdbs(self,load_all:bool=False):
+        """
+        Saves a pdb for every selection object that is currently loaded and 
+        saved in the project. Note, this operation acts on the full project,
+        not the subproject.
+
+        Parameters
+        ----------
+        load_all : bool, optional
+            Force load all data in the project to ensure a pdb from each. 
+            Can be time/memory consuming. The default is False.
+
+        Returns
+        -------
+        None.
+
+        """
+        pdb_dir=os.path.join(self.directory,'pdbs')  #Directory for storing pdbs
+        if not(os.path.exists(pdb_dir)):
+            os.mkdir(pdb_dir)
+        
+        
+        #Load list of existing pdbs
+        data_loc=[]
+        saved_pdb=[]
+        origin=[]
+        if os.path.exists(os.path.join(pdb_dir,'pdb_list.txt')):
+            with open(os.path.join(pdb_dir,'pdb_list.txt'),'r') as f:
+                for line in f:
+                    data_file,pdb_file,pdb_orig=line.strip().split(':')
+                    data_loc.append(data_file)
+                    saved_pdb.append(pdb_file)
+                    origin.append(pdb_orig)
+        
+        if load_all:
+            for d in self.data:pass  #Loads all data
+          
+        with open(os.path.join(pdb_dir,'pdb_list.txt'),'w') as f:
+            for d,filename in zip(self.data.data_objs,self.data.saved_files):
+                if filename is not None:
+                    filename=os.path.split(filename)[1]  #Make sure just the file
+                    if d is None:  #Unloaded data 
+                        if filename in data_loc:  #And that data has a previously saved pdb
+                            i=data_loc.index(filename)
+                            f.write(f'{filename}:{saved_pdb[i]}:{origin[i]}\n')
+                    elif d is not None and filename is not None:  #Loaded data
+                        sel=d.source.select
+                        if sel.uni is None:  #no selection loaded
+                            pass
+                        elif os.path.abspath(sel.uni.filename) in origin:  #pdb already saved
+                            i=origin.index(sel.uni.filename)
+                            f.write(f'{filename}:{saved_pdb[i]}:{origin[i]}\n')
+                        elif os.path.split(os.path.abspath(sel.uni.filename))[0]==os.path.join(self.directory,'pdbs')\
+                            and os.path.split(sel.uni.filename)[1] in saved_pdb: #pdb created on previous save
+                            i=saved_pdb.index(os.path.split(sel.uni.filename)[1])
+                            f.write(f'{filename}:{saved_pdb[i]}:{origin[1]}\n')
+                        else: #We need to save the pdb
+                            fileout=os.path.split(sel.uni.filename)[1].rsplit('.',maxsplit=-1)[0]
+                            count=0
+                            while fileout in saved_pdb: #Ensure unique save location
+                                count+=1
+                                if count==1:fileout+='1'
+                                else:fileout=fileout[:-1]+str(count)
+                            
+                            sel.traj[0]  #Rewind the trajectory before writing
+                            sel.uni.atoms.write(os.path.join(pdb_dir,fileout+'.pdb')) #write the pdb
+                            data_loc.append(filename)
+                            saved_pdb.append(fileout)
+                            origin.append(os.path.abspath(sel.uni.filename))
+                            f.write(f'{data_loc[-1]}:{saved_pdb[-1]}:{origin[-1]}\n')
+                        
+                    
 
     #%% Project operations (|,&,-, i.e. Union, Intersection, and Difference)
     def __add__(self,obj):
-        "Can't make up my mind about this...the | operation is sort of like adding two sets"
+        "Can't make up my mind about this...the or operation is sort of like adding two sets"
         return self.__or__(obj)
     
     def __or__(self,obj):    
         proj=copy(self)
         proj._subproject=True
+        proj._parent=self._parent if self._subproject else self
         proj.chimera=copy(self.chimera)
         proj.chimera.project=proj
         
@@ -1041,6 +1165,7 @@ class Project():
     def __sub__(self,obj):
         proj=copy(self)
         proj._subproject=True
+        proj._parent=self._parent if self._subproject else self
         proj.chimera=copy(self.chimera)
         proj.chimera.project=proj
         
@@ -1065,6 +1190,7 @@ class Project():
     def __and__(self,obj):
         proj=copy(self)
         proj._subproject=True
+        proj._parent=self._parent if self._subproject else self
         proj.chimera=copy(self.chimera)
         proj.chimera.project=proj
         
@@ -1304,6 +1430,7 @@ class Project():
                         sens.append(fit.sens)
                         detect.append(clsDict['Detector'](fit.sens))
         print('Optimized {0} data objects'.format(count))
+        return self
     
     def fit(self, bounds: bool = 'auto', parallel: bool = False) -> None:
         """
@@ -1312,6 +1439,7 @@ class Project():
         sens = list()
         detect = list()
         count = 0
+        to_delete=list()
         for d in self:
             if 'n' in d.detect.opt_pars:
                 count += 1
@@ -1323,7 +1451,15 @@ class Project():
                 else:
                     sens.append(fit.sens)
                     detect.append(fit.detect)
+                if Defaults['reduced_mem']:
+                    if d.source.status=='raw':
+                        i0=self.data.data_objs.index(d)
+                        self.data.data_objs[i0]=None
+                        to_delete.append(self._index.tolist().index(i0))
+        self.remove_data(to_delete)
+                    
         print('Fitted {0} data objects'.format(count))
+        return self
         
     def modes2bonds(self,includeOverall:bool=False,calcCC='auto'):
         """
@@ -1357,6 +1493,7 @@ class Project():
                 count+=1
                 d.modes2bonds()
         print('Converted {0} iRED data objects from modes to bonds'.format(count))
+        return self
                 
 
     #%% iPython stuff   
@@ -1370,17 +1507,17 @@ class Project():
         for t in self.titles:out+=t+'\n'
         return out
         
-    def _ipython_key_completions_(self) -> list:
+    def _ipython_key_completions_(self):
         out = list()
         for k in ['Types','statuses','additional_info','titles','short_files']:
             for v in getattr(self, k):
                 if v not in out:
                     out.append(v)
         for v0 in self.short_files:
-            v=v0.rsplit('.',1)[0]
-            if v not in out:
-                out.append(v)
-            
+            if v0 is not None:
+                v=v0.rsplit('.',1)[0]
+                if v not in out and v is not None:
+                    out.append(v)
         return out
  
 

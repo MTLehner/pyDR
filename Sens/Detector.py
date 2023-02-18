@@ -124,6 +124,7 @@ class Detector(Sens.Sens):
         Obtain the r matrix for fitting with detectors
         """
         self.reload()
+        self.match_parent()
         assert self.__r is not None,"First optimize detectors (r_auto, r_target, r_no_opt)"
         
         if not(self.SVD.up2date):
@@ -148,6 +149,34 @@ class Detector(Sens.Sens):
             self.opt_pars['options']=[]
             for o in opt_pars['options']:
                 getattr(self,o)()
+                
+    def match_parent(self):
+        """
+        If this is a detector sub-object, then match_parent can be run in order
+        when the sensitivities or r-matrix is required of the object.
+
+        Returns
+        -------
+        self
+
+        """
+        if self._parent is None:return
+        
+        self.opt_pars=opts=self._parent.opt_pars
+        
+        inclS2='inclS2' in opts['options']
+        R2ex='R2ex' in opts
+        
+        Type=opts['Type']
+        if Type in ['auto','target','zmax']:
+            target=self._parent.rhoz[inclS2:-1] if R2ex else self._parent.rhoz[inclS2:]
+            self.r_target(target)
+        else:
+            self.r_no_opt(opts['n'])
+        
+        o0=copy(opts['options'])  #What options are used?
+        opts['options']=[]   #Clear the list (options only run if not already in list)
+        for o in o0:getattr(self,o)()  #Run the option (adds back to the list)
             
     
     def update_det(self):
@@ -181,6 +210,7 @@ class Detector(Sens.Sens):
         This works differently than the other sub-classes. update_det finalizes
         the value of _rho, and this function just returns that value.
         """
+        self.match_parent()
         assert 'n' in self.opt_pars,"First, optimize detectors before calling Detector._rho"
         if not(self.SVD.up2date):
             print('Warning: detector sensitivities should be updated due to a change in the input sensitivities')
@@ -571,6 +601,7 @@ class Detector(Sens.Sens):
         self.opt_pars['Normalization']=Normalization
         self.update_det()  
         
+        
     def plot_fit(self,index=None,ax=None,norm=False,**kwargs):
         """
         Plots the sensitivities of the data object.
@@ -717,10 +748,23 @@ class SVD():
             if np.shape(X)[0]>np.shape(X)[1]: #Use sparse version of SVD
                 S2,V=eigs(X.T@X,k=n)
                 self._S=np.sqrt(S2.real)
-                self._U=((X@V)@np.diag(1/self.S)).real
+                self._U=((X@V)@np.diag(1/self._S)).real
                 self._Vt=V.real.T
             else:
                 self._U,self._S,self._Vt=np.linalg.svd(X) #Full calculation
+                self._Vt=self._Vt[:X.shape[0]]
+            
+            sign=[np.sign(V[np.argwhere(np.abs(V)>np.abs(V).max()*0.5)[0,0]]) for V in self._Vt]
+            #By default, the SVD (or eigs) does not return vectors with consistent signs
+            #It's basically random. This wastes a lot of time for us, since we
+            #can't average together data using r_no_opt. Furthermore, we can't
+            #use the same optimization of detectors resulting from different runs
+            #of r_no_opt. So, we come up with some means of always having the same
+            #sign. It does not matter what it is, as long as it's consistent. Then,
+            #we say that the first time the abs(Vt) exceeds half the max(abs(Vt)),
+            #the sign of Vt should always be positive.
+            self._Vt=(self._Vt.T/sign).T
+            self._U/=sign
             
             self._VtCSA=np.diag(1/self._S)@(self._U.T@(self.sens._rho_effCSA[0].T*self.sens.norm).T)
             

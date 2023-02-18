@@ -1,5 +1,9 @@
 # pyDR
-pyDR is the latest implementation of the DIFRATE method of analyzing MD and NMR data. At the moment, the project is under development and is unlikely to function stably except in limited cases. 
+pyDR is the latest implementation of the DIFRATE method of analyzing MD and NMR data. The project should still be considered to be in "testing" phase, but at this point we hope to retain most functionality, and most functions are stable (the PCA module and solution-state sensitivities are still subject to significant changes).<br />
+
+We would advise caution with the various saving functions. While we have not lost any processed data recently due to corruption, a few issues have arisen where moving processed data between computers has caused loading issues. We have thus far been able to repair this, but get in touch if you have problems and cannot fix them.<br />
+
+We will eventually publish this software as a paper, but in the meantime, please consider citing:<br />
 
 Technical details can be found at:<br />
 "Optimized “detectors” for dynamics analysis in solid-state NMR"<br />
@@ -12,9 +16,13 @@ https://doi.org/10.1063/1.5111081
 
 "Interpreting NMR dynamic parameters via the separation of reorientational motion in MD simulation"<br />
 A.A. Smith<br />
-https://arxiv.org/abs/2111.09224
+https://doi.org/10.1016/j.jmro.2022.100045
 
-There is no installation required for this module. Just place in a folder, navigate there and run. However, python3 and the following modules are required. <br />
+"Model-free or Not?"<br />
+K. Zumpfe, A.A. Smith<br />
+https://doi.org/10.3389/fmolb.2021.727553
+
+There is no installation required for this module. Just place in a folder, navigate there (or place on the path) and run. However, python3 and the following modules are required. <br />
 Python v. 3.7.3 <br />
 numpy v. 1.17.2 <br />
 scipy v. 1.3.0 <br />
@@ -25,7 +33,6 @@ pyQT5  (for GUI usage)
 
 Recommended (for speed in processing MD trajectories): <br />
 pyFFTW <br />
-numba <br />
 
 We recommend installing Anaconda: https://docs.continuum.io/anaconda/install/ <br />
 The Anaconda installation includes Python, numpy, scipy, pandas, and matplotlib. 
@@ -34,9 +41,6 @@ MDAnalysis is installed by running:<br />
 conda config --add channels conda-forge<br />
 conda install mdanalysis<br />
 (https://www.mdanalysis.org/pages/installation_quick_start/)
-
-
-run the GUI with 'python3 -m pyDR'
 
 
 

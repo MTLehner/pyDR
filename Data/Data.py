@@ -31,8 +31,9 @@ class Data():
         data object.
         """
 
-        if R is not None:R=np.array(R,dtype=dtype)
-        if Rstd is not None:Rstd=np.array(Rstd,dtype=dtype)
+        if R is not None and not(isinstance(R,np.ndarray)):R=np.array(R,dtype=dtype)
+        if Rstd is not None and not(isinstance(Rstd,np.ndarray)):Rstd=np.array(Rstd,dtype=dtype)
+        if Rc is not None and not(isinstance(Rc,np.ndarray)):Rc=np.array(Rc,dtype=dtype)
         
         "We start with some checks on the data sizes, etc"
         if R is not None and Rstd is not None:
@@ -40,11 +41,11 @@ class Data():
         if R is not None and sens is not None and len(sens.info):
             assert R.shape[1]==sens.rhoz.shape[0],"Shape of sensitivity object is not consistent with shape of R"
         
-        self.R=np.array(R) if R is not None else np.zeros([0,sens.rhoz.shape[0] if sens else 0],dtype=dtype)
-        self.Rstd=np.array(Rstd) if Rstd is not None else np.zeros(self.R.shape,dtype=dtype)
+        self.R=R if R is not None else np.zeros([0,sens.rhoz.shape[0] if sens else 0],dtype=dtype)
+        self.Rstd=Rstd if Rstd is not None else np.zeros(self.R.shape,dtype=dtype)
         self.S2=np.array(S2) if S2 is not None else None
         self.S2std=np.array(S2std) if S2std is not None else None
-        self._Rc=np.array(Rc) if Rc is not None else None
+        self._Rc=Rc if Rc is not None else None
         self._S2c=None
         self.label=np.array(label) if label is not None else None
         if self.label is None:
@@ -66,7 +67,7 @@ class Data():
     @property
     def Rc(self):
         if self._Rc is None and hasattr(self.sens,'opt_pars') and 'n' in self.sens.opt_pars:
-            print("Don't forget to check that this returns the right results")
+            # print("Don't forget to check that this returns the right results")
             #TODO check that this calculation is correct
             self.sens.reload()
             Rc=(self.sens.r@self.R.T).T
@@ -182,15 +183,20 @@ class Data():
     
 
     def __hash__(self):
-        flds = ['R', 'Rstd', 'S2', 'S2std', 'sens', "select"]
+        flds = ['R', 'Rstd', 'S2', 'S2std', 'sens']
         out = 0
         for f in flds:
             if hasattr(self, f) and getattr(self, f) is not None:
                 x = getattr(self, f)
                 if hasattr(x,"tobytes"):
-                    out += hash(x.tobytes())
+                    if x.size>100000:
+                        out+=hash(x[:,::100].tobytes())
+                    else:
+                        out += hash(x.tobytes())
                 else:
                     out += hash(x)
+        if self.source.select is not None:
+            out+=hash(self.source.select)
         return out
     
     def __len__(self):
@@ -199,11 +205,34 @@ class Data():
     def __eq__(self, data) -> bool:
         "Using string means this doesn't break when we do updates. Maybe delete when finalized"
         if str(self.__class__) != str(data.__class__): return False
-        return self._hash == data._hash
+        return self.__hash__() == data.__hash__()
     
     def fit(self, bounds: bool = 'auto', parallel: bool = False):
-        # todo I was a little confused by that, might be useful to rename the return function? -K
-        return fit(self, bounds=bounds, parallel=parallel)
+        """
+        Fits the data set using the attached detector object.
+
+        Parameters
+        ----------
+        bounds : bool, optional
+            Restrict detector responses to not exceed the minima or maxima of
+            the corresponding detector sensitivity. The default is 'auto', which
+            will be False for unoptimized (no_opt) detectors and True otherwise
+        parallel : bool, optional
+            Determines whether to use parallel processing for fitting. Often,
+            the overhead for parallel processing is higher than gains, so not
+            currently recommended. The default is False.
+
+        Returns
+        -------
+        data
+
+        """
+        out=fit(self, bounds=bounds, parallel=parallel)
+        if Defaults['reduced_mem']:  #Destroy the original data object
+            out.src_data=None
+        return out
+                
+        
     
     def opt2dist(self,rhoz_cleanup:bool = False,parallel:bool = False):
         """
@@ -230,13 +259,14 @@ class Data():
         data object
     
         """
+
         return opt2dist(self,rhoz_cleanup=rhoz_cleanup,parallel=parallel)
     
     def save(self, filename, overwrite: bool = False, save_src: bool = True, src_fname=None):
         # todo might be useful to check for src_fname? -K
         if not(save_src):
             src=self.src_data
-            self.src_data=src_fname  #For this to work, we need to update bin_io to save and load by filename
+            self.src_data=src_fname
         write_file(filename=filename,ob=self,overwrite=overwrite)
         if not(save_src):self.src_data=src
     
@@ -318,6 +348,7 @@ class Data():
             return obj+self
         proj=copy(self.source.project)
         proj._subproject=True
+        proj._parent=self.source.project
         proj._index=np.array([],dtype=int)  #Make an empty subproject
         proj=proj+obj           #
         return proj+self
@@ -418,6 +449,9 @@ class Data():
 
         # CMXRemote.send_command(ID,'close')
         CMXRemote.send_command(ID,'open "{0}" maxModels 1'.format(self.select.molsys.topo))
+        # TODO fix this below 
+        from time import sleep
+        sleep(.1)   #This needs to be fixed
         mn=CMXRemote.valid_models(ID)[-1]
         CMXRemote.command_line(ID,'sel #{0}'.format(mn))
 

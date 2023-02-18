@@ -5,7 +5,6 @@ Created on Thu Nov 11 10:28:55 2021
 
 @author: albertsmith
 """
-import warnings
 
 import numpy as np
 import os
@@ -31,7 +30,7 @@ class NMR(Sens):
         "Load the various parameters into info"
         for name in dir(NMRexper):
             f=getattr(NMRexper,name)
-            pars=['Type','v0','v1','vr','offset','stdev','med_val','Nuc','Nuc1','dXY','CSA','eta','CSoff','QC','etaQ']
+            pars=['Type','v0','v1','vr','offset','stdev','med_val','Nuc','Nuc1','dXY','CSA','eta','CSoff','QC','etaQ','theta']
             if hasattr(f,'__code__') and f.__code__.co_varnames[0]=='tc':
                 for p0 in f.__code__.co_varnames[1:f.__code__.co_argcount]:
                     if p0 not in pars:pars.append(p0)
@@ -39,11 +38,6 @@ class NMR(Sens):
         for p0 in pars:self.info.new_parameter(p0)
         
         self.new_exper(info,**kwargs)
-
-    # def __hash__(self):
-    #     x = 0
-    #     warnings.warn("not implemented yet, please implement")
-    #     return 0
         
     def new_exper(self,info=None,**kwargs):
         """
@@ -55,6 +49,19 @@ class NMR(Sens):
         having multiple dipole-coupled nuclei. A list of lists will correct this
         behavior if what is desired is a different set of couplings for each 
         experiment.
+        
+
+        Parameters
+        ----------
+        info : pyDR.Sens.Info
+            Append experiments defined by an Info object.
+        **kwargs : TYPE
+            Parameters describing the individual experiments.
+
+        Returns
+        -------
+        None.
+
         """
         if info is not None:self.info.append(info)
         

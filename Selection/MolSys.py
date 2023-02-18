@@ -52,18 +52,19 @@ class MolSys():
         MolSys.
 
         """
-        if traj_files is not None and not(isinstance(traj_files,list) and len(traj_files)==0):
+        if topo is None:
+            self._uni=None
+            self._traj=None
+            return
+        elif traj_files is not None and not(isinstance(traj_files,list) and len(traj_files)==0):
             if isinstance(traj_files,list):
                 traj_files=[os.path.abspath(tf) for tf in traj_files]
             else:
                 traj_files=os.path.abspath(traj_files)
             self._uni=Universe(os.path.abspath(topo),traj_files)
-        elif topo is not None:
-            self._uni=Universe(topo)
         else:
-            self._uni=None
-            self._traj=None
-            return
+            self._uni=Universe(topo)
+
         
         self._orig_topo=topo
         
@@ -86,7 +87,8 @@ class MolSys():
         return self._traj
     @property
     def topo(self):
-        return self.uni.filename
+        if self.uni is not None:
+            return self.uni.filename
 
     @property
     def details(self):
@@ -267,7 +269,9 @@ class Trajectory():
         if name in ['t0','tf','step']:
             value=int(value)
         if name=='tf':
-            assert value<=self.__tf,"tf must be less than or equal to the original trajectory length ({} frames)".format(self.__tf)
+            if value>self.__tf:
+                print(f'Warning: tf={value} is greater than the original trajectory length, setting to {self.__tf}')
+                value=self.__tf
             value=(value-1)%self.__tf+1 #Take care of negative indices
         super().__setattr__(name,value)
         
@@ -391,7 +395,7 @@ class MolSelect():
                         sel=sel0[0][:0]
                         for s in sel0:
                             sel+=s
-                            setattr(self,f,sel)
+                        setattr(self,f,sel)
             elif value==False and self._mdmode:
                 if self._sel1 is not None:
                     sel1=np.zeros(len(self._sel1),dtype=object)
@@ -402,7 +406,7 @@ class MolSelect():
                     for k in range(len(self._sel2)):sel2[k]=self._sel2[k:k+1]
                     self._sel2=sel2
                     
-        if name=='repr_sel':
+        if name=='repr_sel' and value is not None:
             if self.sel1 is not None and len(self.sel1)!=len(value):
                 print('Warning: length of sel1 and repr_sel are not equal. This will cause errors in ChimeraX')
         if name in ['sel1','sel2','repr_sel']:
@@ -474,6 +478,7 @@ class MolSelect():
                 (ivl: ILE,VAL,LEU, ivla: ILE,LEU,VAL,ALA, ch3: all methyl groups)
                 (e.g. ivl1: only take one bond per methyl group)
                 (e.g. ivlr,ivll: Only take the left or right methyl group)
+            'sidechain' : Selects a vector representative of sidechain motion
         
         Note that it is possible to provide a list of keywords for Nuc in order
         to simultaneously evaluate multiple bond types. In this case, sorting
@@ -496,7 +501,7 @@ class MolSelect():
 
         Returns
         -------
-        None.
+        self
 
         """
         
@@ -536,6 +541,8 @@ class MolSelect():
         self.repr_sel=repr_sel
         self.set_label(label)
         self._mdmode=_mdmode
+        
+        return self
 
     @property
     def repr_sel(self):
@@ -858,7 +865,7 @@ class MolSelect():
                 CMXRemote.send_command(ID,cmd)
         
         if self.sel1 is not None:
-            ids=np.concatenate([s.indices for s in self.repr_sel[index]],dtype=int)
+            ids=np.concatenate([s.indices for s in self.repr_sel[index]]).astype(int)
         
         if x is None:
             CMXRemote.show_sel(ID,ids=ids,color=color)
