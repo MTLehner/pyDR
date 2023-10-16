@@ -48,8 +48,13 @@ class Info():
                 if value is not None and self.N==0:
                     self.N=len(value)
                     self.__values=np.zeros([len(self.keys),self.N],dtype=object)
-                assert len(value)==self.N,"Length of the parameter should equal the number of experiments ({})".format(self.N) 
-                self.__values[self.keys.index(key)]=value
+                
+                if isinstance(value,str) or not(hasattr(value,'__len__')):
+                    for k in range(self.N):
+                        self[key,k]=value
+                else:
+                    assert len(value)==self.N,"Length of the parameter should equal the number of experiments ({})".format(self.N) 
+                    self.__values[self.keys.index(key)]=value
             else:
                 if self.__values.size==0:
                     if value is None:
@@ -278,6 +283,8 @@ class Info():
         """
         Delete one or more experiments from info
         """
+        
+        index=np.mod(index,self.N)
         
         if hasattr(index,'__len__'):
             i=np.ones(self.N,dtype=bool)

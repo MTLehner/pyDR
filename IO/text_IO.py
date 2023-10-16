@@ -10,6 +10,7 @@ import os
 from pyDR import clsDict,Defaults
 import numpy as np
 from scipy.stats import mode
+from .download import download,cleanup_google_link
 dtype=Defaults['dtype']
 
 def writeNMR(filename,ob,overwrite=False):
@@ -32,6 +33,22 @@ def readNMR(filename):
         except:
             pass
         return
+    
+    if not(os.path.exists(filename)): #Try to download online
+        try:
+            url=filename
+            filename=download(filename,f'temp{np.random.randint(10000)}')
+            data=readNMR(filename)
+            data.details[0]=f'NMR data loaded from {url}'
+            if 'drive.google' in url:
+                data.source.filename=cleanup_google_link(url).split('=')[1][:10]
+            else:
+                data.source.filename=os.path.split(url)[1]
+            os.remove(filename)
+            return data
+        except:
+            pass
+            
     with open(filename,'r') as f:
         info,keys=None,None
         for line in f:
@@ -45,7 +62,11 @@ def readNMR(filename):
         elif keys is None:
             return info
         else:
-            sens=clsDict['NMR'](info=info)
+            if 'tM' in info.keys:
+                sens=clsDict['SolnNMR'](info=info)
+            else:
+                sens=clsDict['NMR'](info=info)
+            
             data=clsDict['Data'](sens=sens,**keys)
             data.source.filename=os.path.abspath(filename)
             data.source.status='raw'
@@ -93,7 +114,10 @@ def read_INFO(f):
             else:
                 out.append(assign_type(v))
         pars[key]=out
-    info=clsDict['NMR'](**pars).info
+    if 'tM' in pars:
+        info=clsDict['SolnNMR'](**pars).info
+    else:
+        info=clsDict['NMR'](**pars).info
     return info
 
 #%% Data read and write
@@ -135,6 +159,7 @@ def read_Data(f):
             values=list()
             isstr=False
         elif len(line.strip())!=0:
+            line='\t'.join(line.strip().split())
             if '\t' in line.strip():
                 values.append(list())
                 line=line.strip()
@@ -155,9 +180,65 @@ def read_Data(f):
                 
             
     
+#%% pdb writer
+def writePDB(sel,filename:str,x=None):
+    """
+    Creates a pdb based on the current position of the selection object. One may
+    define x (list-like, numpy array) which has the same length as the selection
+    in order to set the beta-factor in the pdb.
+
+    Parameters
+    ----------
+    sel : MolSelect
+        Selection from which to write the pdb.
+    filename : str
+        DESCRIPTION.
+    x : list, numpy array, optional
+        Data to write into the pdb beta-factor. Should have the same length as
+        the selection. Note that x will get written onto atoms in the 
+        representative selection, including averaging in case an atom appears
+        in more than one selection. beta set to zero if the atom does not 
+        appear in any of sel.repr_sel.
+
+    Returns
+    -------
+    None.
+
+    """
     
-                    
-                        
+    atoms=sel.molsys.uni.atoms
+    atoms.tempfactors=np.zeros(len(atoms))
+    beta=np.zeros(len(atoms))
+    if x is not None:
+        assert len(x)==len(sel),'x must have the same length as sel'
+        count=np.zeros(len(atoms),dtype=int)
+        ids=atoms.indices
+        for x0,repr_sel in zip(x,sel.repr_sel):
+            i=np.isin(ids,repr_sel.indices)
+            beta[i]+=x0
+            count[i]+=1
+        count[count==0]=1
+        beta/=count
+    
+    if filename[-4:]!='.pdb':filename=filename+'.pdb'
+    
+    temp='_'+filename
+    
+    atoms.write(temp)
+    
+    k=0
+    with open(temp,'r') as f0:
+        with open(filename,'w') as f1:
+            for line in f0:
+                if line[:4]=='ATOM':
+                    l1,l2=line.rsplit(' 0.00',maxsplit=1)
+                    f1.write(l1+f'{beta[k]:5.2f}'+l2)
+                    k+=1
+                else:
+                    f1.write(line)
+    os.remove(temp)
+
+    
 
 #%% Misc functions
 

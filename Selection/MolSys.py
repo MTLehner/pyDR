@@ -10,6 +10,7 @@ from MDAnalysis import Universe, AtomGroup
 from pyDR.misc.ProgressBar import ProgressBar
 from pyDR.Selection import select_tools as selt
 from pyDR.MDtools.vft import pbc_corr
+from pyDR.IO import getPDB
 from pyDR import Defaults,clsDict
 from copy import copy
 import os
@@ -52,6 +53,10 @@ class MolSys():
         MolSys.
 
         """
+        
+        if topo is not None and len(topo)==4 and not(os.path.exists(topo)):
+            topo=getPDB(topo)
+        
         if topo is None:
             self._uni=None
             self._traj=None
@@ -468,7 +473,7 @@ class MolSelect():
         return out
         
         
-    def select_bond(self,Nuc,resids=None,segids=None,filter_str:str=None,label=None) -> None:
+    def select_bond(self,Nuc,resids=None,segids=None,filter_str:str=None,label=None):
         """
         Select a bond according to 'Nuc' keywords
             '15N','N','N15': select the H-N in the protein backbone
@@ -868,7 +873,8 @@ class MolSelect():
             ids=np.concatenate([s.indices for s in self.repr_sel[index]]).astype(int)
         
         if x is None:
-            CMXRemote.show_sel(ID,ids=ids,color=color)
+            if self.sel1 is not None:
+                CMXRemote.show_sel(ID,ids=ids,color=color)
         else:
             assert len(x)==len(self.sel1[index]),'Length of x must match the length of the selection'
             x=np.array(x)

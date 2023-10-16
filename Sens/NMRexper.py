@@ -91,11 +91,20 @@ def NOE(tc,Nuc,v0,Nuc1,dXY):
     vX=NucInfo(Nuc)/NucInfo('1H')*v0
     R=np.zeros(np.shape(tc))
     
-    if Nuc1!=None:
-        vY=NucInfo(Nuc1)/NucInfo('1H')*v0
-        S=NucInfo(Nuc1,'spin')
-        sc=S*(S+1)*4/3 # Scaling factor depending on the spin, =1 for spin 1/2
-        R+=sc*(np.pi*dXY/2)**2*(-J(tc,vX-vY)+6*J(tc,vY+vX))
+    dXY=np.atleast_1d(dXY)
+    Nuc1=np.atleast_1d(Nuc1)
+    assert Nuc1.size==dXY.size,"Nuc1 and dXY must have the same size"
+    if len(dXY)>1:print('Warning: The behavior of NOE has been changed to accept multiple dipole couplings.',
+                        '\nPlease check that you intended to use this behavior',
+                        '\nThis warning will be removed at a later point')
+    
+    
+    for N1,dXY1 in zip(Nuc1,dXY):
+        if N1!=None:
+            vY=NucInfo(N1)/NucInfo('1H')*v0
+            S=NucInfo(N1,'spin')
+            sc=S*(S+1)*4/3 # Scaling factor depending on the spin, =1 for spin 1/2
+            R+=sc*(np.pi*dXY1/2)**2*(-J(tc,vX-vY)+6*J(tc,vY+vX))
         
     return R
 
@@ -122,44 +131,60 @@ def R1Q(tc,Nuc,v0,QC=0,etaQ=0):
         
     return R
 
-def R1p(tc,Nuc,v0,Nuc1=None,CSA=0,dXY=0,eta=0,vr=0,v1=0,off=0,QC=0,etaQ=0):
+def R1p(tc,Nuc,v0,Nuc1=None,CSA=0,dXY=0,eta=0,vr=0,v1=0,offset=0,QC=0,etaQ=0):
     #Calc R1 contributions before scaling input values
     R10=R1(tc,Nuc,v0,Nuc1=Nuc1,CSA=CSA,dXY=dXY,eta=eta,vr=vr,CSoff=0,QC=QC,etaQ=etaQ)    #We do this first, because it includes all R1 contributions
     
     v0*=1e6 #Input in MHz
     v1*=1e3 #Input in kHz
     vr*=1e3 #Input in kHz
+    v1Y=0
+    v1Y*=1e3
     vX=NucInfo(Nuc)/NucInfo('1H')*v0
     
     CSA=CSA*vX/1e6 #Input in ppm
     R=np.zeros(np.shape(tc))
     
     "Treat off-resonance spin-lock"
-    ve=np.sqrt(v1**2+off**2)
+    ve=np.sqrt(v1**2+offset**2)
     if ve==0:
         theta=np.pi/2
     else:
-        theta=np.arccos(off/ve)
+        theta=np.arccos(offset/ve)
     
 
     "Start here with the dipole contributions"
+    R1del=np.zeros(np.shape(tc))
     if Nuc1 is not None:
-        if np.size(dXY)==1:
-            vY=NucInfo(Nuc1)/NucInfo('1H')*v0
-            S=NucInfo(Nuc1,'spin')
+        dXY=np.atleast_1d(dXY)
+        Nuc1=np.atleast_1d(Nuc1)
+        
+        # if np.size(dXY)==1:
+        #     vY=NucInfo(Nuc1)/NucInfo('1H')*v0
+        #     S=NucInfo(Nuc1,'spin')
+        #     sc=S*(S+1)*4/3 #Scaling depending on spin of second nucleus
+        #     R1del=sc*(np.pi*dXY/2)**2*(3*J(tc,vY)+
+        #               1/6*J(tc,2*vr-ve+v1Y)+2/6*J(tc,vr-ve+v1Y)+2/6*J(tc,vr+ve+v1Y)+1/6*J(tc,2*vr+ve+v1Y)+
+        #               1/6*J(tc,2*vr-ve-v1Y)+2/6*J(tc,vr-ve-v1Y)+2/6*J(tc,vr+ve-v1Y)+1/6*J(tc,2*vr+ve-v1Y))
+        # else:            
+        for k in range(0,np.size(dXY)):
+            vY=NucInfo(Nuc1[k])/NucInfo('1H')*v0
+            S=NucInfo(Nuc1[k],'spin')
             sc=S*(S+1)*4/3 #Scaling depending on spin of second nucleus
-            R1del=sc*(np.pi*dXY/2)**2*(3*J(tc,vY)+
-                      1/3*J(tc,2*vr-ve)+2/3*J(tc,vr-ve)+2/3*J(tc,vr+ve)+1/3*J(tc,2*vr+ve))
-        else:            
-            R1del=np.zeros(np.shape(tc))
-            for k in range(0,np.size(dXY)):
-                vY=NucInfo(Nuc1[k])/NucInfo('1H')*v0
-                S=NucInfo(Nuc1[k],'spin')
-                sc=S*(S+1)*4/3 #Scaling depending on spin of second nucleus
+            if vX==vY:
+                print('homonuclear')
+                R1del+=sc*(np.pi*dXY[k]/2)**2*(1/24*(1+3*np.cos(2*theta)**2)*J(tc,vr)+
+                                              1/48*(1+3*np.cos(2*theta)**2)*J(tc,2*vr)+
+                                              3/4*np.sin(theta)**4*(J(tc,2*ve+vr)+0.5*J(tc,2*ve+2*vr)+
+                                                        1/2*J(tc,2*ve-2*vr)+J(tc,2*ve-vr))+
+                                              3/8*np.sin(2*theta)**2*(J(tc,ve+vr)+1/2*J(tc,ve+2*vr)+
+                                                        1/2*J(tc,ve-2*vr)+J(tc,ve-vr)))
+                # TODO We should double check that the T1 contribution is correct  
+            else:
                 R1del+=sc*(np.pi*dXY[k]/2)**2*(3*J(tc,vY)+
-                          1/3*J(tc,2*vr-ve)+2/3*J(tc,vr-ve)+2/3*J(tc,vr+ve)+1/3*J(tc,2*vr+ve))
-    else:
-        R1del=np.zeros(np.shape(tc))
+                          1/6*J(tc,2*vr-ve+v1Y)+2/6*J(tc,vr-ve+v1Y)+2/6*J(tc,vr+ve+v1Y)+1/6*J(tc,2*vr+ve+v1Y)+
+                          1/6*J(tc,2*vr-ve-v1Y)+2/6*J(tc,vr-ve-v1Y)+2/6*J(tc,vr+ve-v1Y)+1/6*J(tc,2*vr+ve-v1Y))
+                
     "CSA contributions"
     R1del+=1/6*(2*np.pi*CSA)**2*(1/2*J(tc,2*vr-ve)+J(tc,vr-ve)+J(tc,vr+ve)+1/2*J(tc,2*vr+ve))
     "Here should follow the quadrupole treatment!!!"    
@@ -168,8 +193,8 @@ def R1p(tc,Nuc,v0,Nuc1=None,CSA=0,dXY=0,eta=0,vr=0,v1=0,off=0,QC=0,etaQ=0):
     R+=R10+np.sin(theta)**2*(R1del-R10/2) #Add together the transverse and longitudinal contributions   
     return R
 
-def R2(tc,Nuc,v0,Nuc1=None,CSA=0,dXY=0,eta=0,vr=0,v1=0,off=0,QC=0,etaQ=0):    
-    return R1p(tc,Nuc,v0,Nuc1=Nuc1,CSA=CSA,dXY=dXY,eta=eta,vr=0,v1=0,off=off,QC=QC,etaQ=etaQ)  
+def R2(tc,Nuc,v0,Nuc1=None,CSA=0,dXY=0,eta=0,vr=0,v1=0,offset=0,QC=0,etaQ=0):    
+    return R1p(tc,Nuc,v0,Nuc1=Nuc1,CSA=CSA,dXY=dXY,eta=eta,vr=0,v1=0,offset=offset,QC=QC,etaQ=etaQ)  
 
 def S2(tc):
     """

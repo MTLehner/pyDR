@@ -641,7 +641,8 @@ class Data_iRED(Data):
         ----------
         rho_index : int, optional
             Specifies which detector window to plot. The default None plots the
-            total correlation (not timescale specific)
+            total correlation (not timescale specific). Setting to 'all' creates
+            multiple axes in a figure and plots all detectors.
         norm : bool, optional
             Determines whether to plot normalized data. The default is True.
         abs_val : bool, optional
@@ -666,22 +667,37 @@ class Data_iRED(Data):
         
         assert hasattr(self,'CCnorm'),"No CC data present in data object"
         
-        if hasattr(rho_index,'lower') and rho_index.lower()=='all':
-            ax,*_=subplot_setup(self.CCnorm.shape[0])
-            for k,a in enumerate(ax):
-                self.plot_CC(rho_index=k,index=index,norm=norm,abs_val=abs_val,color=color,ax=a,**kwargs)
-            for a in ax[1:]:
-                a.sharex(ax[0])
-                a.sharey(ax[0])
-            ax[0].figure.tight_layout()
-            # def empty_formatter(a,b):
-            #     return ''
-            # for a in ax:
-            #     if not(a.get_subplotspec().is_first_row()):a.xaxis.set_major_formatter(empty_formatter)
-            #     if not(a.get_subplotspec().is_last_col()):a.yaxis.set_major_formatter(empty_formatter)
-                    
-                    
+        
+        if hasattr(rho_index,'__len__'):
+            if isinstance(rho_index,str) and rho_index.lower()=='all':
+                rho_index=np.arange(self.CCnorm.shape[0])
+                
+            rho_index=np.array(rho_index,dtype=int)
+            ax,*_=subplot_setup(len(rho_index))
+            for ri,a in zip(rho_index,ax):
+                self.plot_CC(rho_index=ri,index=index,norm=norm,abs_val=abs_val,color=color,ax=a,**kwargs)
+                for a in ax[1:]:
+                    a.sharex(ax[0])
+                    a.sharey(ax[0])
+                ax[0].figure.tight_layout()
             return ax
+        
+        # if hasattr(rho_index,'lower') and rho_index.lower()=='all':
+        #     ax,*_=subplot_setup(self.CCnorm.shape[0])
+        #     for k,a in enumerate(ax):
+        #         self.plot_CC(rho_index=k,index=index,norm=norm,abs_val=abs_val,color=color,ax=a,**kwargs)
+        #     for a in ax[1:]:
+        #         a.sharex(ax[0])
+        #         a.sharey(ax[0])
+        #     ax[0].figure.tight_layout()
+        #     # def empty_formatter(a,b):
+        #     #     return ''
+        #     # for a in ax:
+        #     #     if not(a.get_subplotspec().is_first_row()):a.xaxis.set_major_formatter(empty_formatter)
+        #     #     if not(a.get_subplotspec().is_last_col()):a.yaxis.set_major_formatter(empty_formatter)
+                    
+                    
+        #     return ax
             
             
         
@@ -805,9 +821,12 @@ class Data_iRED(Data):
             CMXRemote.send_command(ID,'color '+'|'.join(['#{0}/{1}:{2}@{3},'.format(mn,s.segid,s.resid,s.name) for s in sel0])+' black')
             return sel0
         else:
-            mn=CMXRemote.how_many_models(ID)+1
+            # mn=CMXRemote.how_many_models(ID)+1
+            om=CMXRemote.how_many_models(ID)
             CMXRemote.send_command(ID,'open "{0}"  maxModels 1'.format(self.select.molsys.topo))
-            # mn=CMXRemote.valid_models(ID)[-1]
+            while om==CMXRemote.how_many_models(ID):
+                pass
+            mn=CMXRemote.valid_models(ID)[-1]
             
             CMXRemote.command_line(ID,'sel #{0}'.format(mn))
 

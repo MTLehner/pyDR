@@ -38,8 +38,11 @@ class DataPlots():
         assert mode in ['auto','union','b_in_a'],"mode must be 'auto','union', or 'b_in_a'"
         self._mode=mode  
         if data is not None:
-            self.append_data(data,style=style,errorbars=errorbars,index=index,rho_index=rho_index,split=split,**kwargs)
-            
+            self.append_data(data,style=style,errorbars=errorbars,index=index,rho_index=rho_index,split=split,plot_sens=plot_sens,**kwargs)
+    
+    def _ipython_display_(self):
+        return self.fig        
+    
     @property
     def mode(self):
         if self._mode=='auto':
@@ -128,7 +131,11 @@ class DataPlots():
             color=self.colors[m%len(self.colors)]
             if not((a if hasattr(a,'is_last_row') else a.get_subplotspec()).is_last_row()):
                    plt.setp(a.get_xticklabels(), visible=False)
-            a.set_ylabel(r'$\rho_{'+'{}'.format(k+not_rho0)+r'}^{(\theta,S)}$')
+            if hasattr(self.data[0].sens,'opt_pars') and 'R2ex' in self.data[0].sens.opt_pars['options'] \
+                and k==self.data[0].sens.rhoz.shape[0]-1:
+                    a.set_ylabel(r'$R_2^{ex}$ / s$^{-1}$')
+            else:
+                a.set_ylabel(r'$\rho_{'+'{}'.format(k+not_rho0)+r'}^{(\theta,S)}$')
             a.yaxis.label.set_color(color)
         
             
@@ -174,6 +181,7 @@ class DataPlots():
                    horizontalalignment='left',verticalalignment='top',
                    color=self.colors[m%len(self.colors)],fontsize='x-small',   
                    s=string.format(val,k).replace('XXX',sym)))
+        return self
             
     def remove_tc(self):
         """
@@ -187,6 +195,7 @@ class DataPlots():
         if self.tclabels is not None:
             for v in self.tclabels:v.remove()
             self.tclabels=None
+        return self
     
     def calc_rho_index(self,i=-1):
         if len(self.data)==1:return np.arange(self.data[0].R.shape[1])
@@ -200,6 +209,7 @@ class DataPlots():
         (function will only return if self.ax_sens is None, i.e. there is no 
         sensitivity plot)
         """
+        if not(self._plot_sens):return
         color,linestyle=(None,'-') if self.data.__len__()==1 or i==0 else ((.2,.2,.2),':')
         maxes=self.data[i].sens.rhoz.max(1)
         norm=maxes.max()/maxes.min()>20
@@ -542,7 +552,13 @@ def plot_fit(lbl,Rin,Rc,Rin_std=None,info=None,index=None,exp_index=None,fig=Non
             if lbl0 is not None:
                 a.set_xticks(ii)
         if yax[k]:
-            a.set_ylabel(r'R / s$^{-1}$')
+            if 'Type' in info.keys:
+                a.set_ylabel(r'$R$ / s^${-1}$')
+            elif 't' in info.keys:
+                a.set_ylabel(r'$C(t)$')
+            else:
+                a.set_ylabel(r'$\rho_n^{(\theta,S)}$')
+            a.set_ylabel(r'R / s$^{-1}$' if 'Type' in info.keys else r'')
         
         #Apply labels to each plot if we find experiment type in the info array
         if info is not None and 'Type' in info.keys:
@@ -584,7 +600,7 @@ def subplot_setup(nexp,fig=None):
     "How many subplots"
     SZ=np.sqrt(nexp)
     SZ=[np.ceil(SZ).astype(int),np.floor(SZ).astype(int)]
-    if np.prod(SZ)<nexp: SZ[1]+=1
+    if np.prod(SZ)+.01<nexp: SZ[1]+=1
     ntop=np.mod(nexp,SZ[1]) #Number of plots to put in the top row    
     if ntop==0:ntop=SZ[1]     
     

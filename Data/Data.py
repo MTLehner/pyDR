@@ -70,8 +70,15 @@ class Data():
             # print("Don't forget to check that this returns the right results")
             #TODO check that this calculation is correct
             self.sens.reload()
-            Rc=(self.sens.r@self.R.T).T
-            if 'inclS2' in self.sens.opt_pars['options']:
+            R=self.R.T
+            # if 'R2ex' in self.sens.opt_pars['options']:
+            #     R=np.concatenate([R,[self.R2]],axis=0)
+                
+            Rc=(self.sens.r@R).T
+            inclS2='inclS2' in self.sens.opt_pars['options']
+            for k,Rc0 in enumerate(Rc):
+                Rc0+=np.concatenate((self.sens.sens[k].R0,[0])) if inclS2 else self.sens.sens[k].R0
+            if inclS2:
                 self._S2c,self._Rc=1-Rc[:,-1],Rc[:,:-1]
             else:
                 self._Rc=Rc
@@ -448,10 +455,10 @@ class Data():
 
 
         # CMXRemote.send_command(ID,'close')
+        om=CMXRemote.how_many_models(ID)
         CMXRemote.send_command(ID,'open "{0}" maxModels 1'.format(self.select.molsys.topo))
-        # TODO fix this below 
-        from time import sleep
-        sleep(.1)   #This needs to be fixed
+        while om==CMXRemote.how_many_models(ID):
+            pass
         mn=CMXRemote.valid_models(ID)[-1]
         CMXRemote.command_line(ID,'sel #{0}'.format(mn))
 
@@ -469,6 +476,42 @@ class Data():
         out=dict(R=R,rho_index=rho_index,ids=ids)
         # CMXRemote.remove_event(ID,'Detectors')
         CMXRemote.add_event(ID,'Detectors',out)
+        
+    def nglview(self,rho_index:int,index=None,scaling:float=None,no_plot:bool=False):
+        """
+        Plots a selected detector response in the NGL viewer (for ipython).
+
+        Parameters
+        ----------
+        rho_index : int
+            Which detector to plot
+        index : TYPE, optional
+            Index specifying which residues to plot. The default is None (all residues)
+        scaling : float, optional
+            Scaling factor for plotting. The default is None (scaled to max response)
+        no_plot : bool, optional
+            If set to True, will return the setup object (NglPlot) rather than
+            the NGL viewer object (allows some additional editing)
+
+        Returns
+        -------
+        None.
+
+        """
+        from ..NGLViewer import NglPlot
+        from matplotlib.pyplot import get_cmap
+        
+        
+        if index is None:index=np.ones(self.R.shape[0],dtype=bool)
+        x=self.R[index,rho_index]
+        if scaling is None:scaling=1/np.abs(x).max()
+        
+        ngl=NglPlot(self.select.repr_sel[index],x=x*scaling,color=get_cmap('tab10')(rho_index)[:3])
+        
+        if no_plot:return ngl
+        
+        return ngl()
+        
                 
     @property
     def movies(self):

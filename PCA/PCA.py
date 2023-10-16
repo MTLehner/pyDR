@@ -52,10 +52,8 @@ class PCA():
         Selects a group of atoms based on a selection string, using the 
         MDAnalysis select_atoms function.
         
-        The resulting selection will replace the selection in PCA.select.sel1 and
-        set PCA.select.sel2 to None. Not intended for use when back-calculating
-        the correlation functions in NMR.
-
+        The resulting selection will be stored in PCA.sel0
+        
         Parameters
         ----------
         select_string : str
@@ -198,7 +196,7 @@ class PCA():
         self.traj.ProgressBar=True
         pos=np.array([atoms.positions for _ in self.traj])
 
-        self.source=clsDict['Source'](Type='PCAmode',select=copy(self.select),filename=self.traj.files,
+        self._source=clsDict['Source'](Type='PCAmode',select=copy(self.select),filename=self.traj.files,
                       status='raw')
         self.source.details.append('PCA analysis')
         self.source.details.append(self.select.details)
@@ -340,7 +338,7 @@ class PCA():
         i=np.arange(len(self.atoms)) if sel is None else (self.sel1index if sel==1 else self.sel2index)
         pos0=self.mean[i]
         
-        pos0+=A*self.PC[:,n].reshape([self.pos.shape[1],3])
+        pos0+=A*self.PC[:,n].reshape([self.PC.shape[0]//3,3])
         return pos0
     
     def write_pdb(self,n:int=0,A:float=None,PCamp:list=None,filename:str=None):
@@ -436,6 +434,7 @@ class PCA():
             clr=[int(c*100) for c in plt.get_cmap('tab10')(mdls-1)[:-1]]
             self.project.chimera.command_line(['~ribbon','show','color #{0} {1},{2},{3}'.format(mdls,clr[0],clr[1],clr[2])])
         self.project.chimera.command_line(self.project.chimera.saved_commands)
+    
     @property
     def PCamp(self):
         """
@@ -659,7 +658,8 @@ class PCA():
 
         """
         assert t0<self.PCamp.shape[1],f"t0 must be less than the trajectory length ({self.PCamp.shape[1]})"
-        tf=min(tf,self.PCamp.shape[1])
+        if tf is None:tf=self.PCamp.shape[1]
+        # tf=min(tf,self.PCamp.shape[1])
         t0=t0%self.PCamp.shape[1]
         tf=self.PCamp.shape[1] if tf is None else (((tf-1)%self.PCamp.shape[1])+1 if tf else 0)
         if self._Ct is None or t0!=self._Ct[0] or tf!=self._Ct[1]:
